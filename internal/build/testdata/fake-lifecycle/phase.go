@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -102,7 +101,7 @@ func testRegistryAccess(repoName string) {
 
 func testRead(filename string) {
 	fmt.Println("read test")
-	contents, err := ioutil.ReadFile(filepath.Clean(filename))
+	contents, err := os.ReadFile(filepath.Clean(filename))
 	if err != nil {
 		fmt.Printf("failed to read file '%s'\n", filename)
 		os.Exit(1)
@@ -120,13 +119,13 @@ func testRead(filename string) {
 
 func testEnv() {
 	fmt.Println("env test")
-	fis, err := ioutil.ReadDir("/platform/env")
+	fis, err := os.ReadDir("/platform/env")
 	if err != nil {
 		fmt.Printf("failed to read /plaform/env dir: %s\n", err)
 		os.Exit(1)
 	}
 	for _, fi := range fis {
-		contents, err := ioutil.ReadFile(filepath.Join("/", "platform", "env", fi.Name()))
+		contents, err := os.ReadFile(filepath.Join("/", "platform", "env", fi.Name()))
 		if err != nil {
 			fmt.Printf("failed to read file /plaform/env/%s: %s\n", fi.Name(), err)
 			os.Exit(1)
@@ -186,14 +185,19 @@ func testBinds() {
 }
 
 func readDir(dir string) {
-	fis, err := ioutil.ReadDir(dir)
+	fis, err := os.ReadDir(dir)
 	if err != nil {
 		fmt.Printf("failed to read %s dir: %s\n", dir, err)
 		os.Exit(1)
 	}
 	for _, fi := range fis {
 		absPath := filepath.Join(dir, fi.Name())
-		stat := fi.Sys().(*syscall.Stat_t)
+		info, err := fi.Info()
+		if err != nil {
+			fmt.Printf("failed to dir info %s err: %s\n", fi.Name(), err)
+			os.Exit(1)
+		}
+		stat := info.Sys().(*syscall.Stat_t)
 		fmt.Printf("%s %d/%d \n", absPath, stat.Uid, stat.Gid)
 		if fi.IsDir() {
 			readDir(absPath)

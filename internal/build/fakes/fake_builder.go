@@ -8,6 +8,7 @@ import (
 
 	"github.com/buildpacks/pack/internal/build"
 	"github.com/buildpacks/pack/internal/builder"
+	"github.com/buildpacks/pack/pkg/dist"
 )
 
 type FakeBuilder struct {
@@ -16,6 +17,8 @@ type FakeBuilder struct {
 	ReturnForGID                 int
 	ReturnForLifecycleDescriptor builder.LifecycleDescriptor
 	ReturnForStack               builder.StackMetadata
+	ReturnForRunImages           []builder.RunImageMetadata
+	ReturnForOrderExtensions     dist.Order
 }
 
 func NewFakeBuilder(ops ...func(*FakeBuilder)) (*FakeBuilder, error) {
@@ -64,6 +67,12 @@ func WithImage(image imgutil.Image) func(*FakeBuilder) {
 	}
 }
 
+func WithOrderExtensions(orderExt dist.Order) func(*FakeBuilder) {
+	return func(builder *FakeBuilder) {
+		builder.ReturnForOrderExtensions = orderExt
+	}
+}
+
 func WithUID(uid int) func(*FakeBuilder) {
 	return func(builder *FakeBuilder) {
 		builder.ReturnForUID = uid
@@ -96,8 +105,16 @@ func (b *FakeBuilder) LifecycleDescriptor() builder.LifecycleDescriptor {
 	return b.ReturnForLifecycleDescriptor
 }
 
+func (b *FakeBuilder) OrderExtensions() dist.Order {
+	return b.ReturnForOrderExtensions
+}
+
 func (b *FakeBuilder) Stack() builder.StackMetadata {
 	return b.ReturnForStack
+}
+
+func (b *FakeBuilder) RunImages() []builder.RunImageMetadata {
+	return b.ReturnForRunImages
 }
 
 func WithBuilder(builder *FakeBuilder) func(*build.LifecycleOptions) {

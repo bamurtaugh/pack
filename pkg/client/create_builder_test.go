@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/buildpacks/imgutil/fakes"
 	"github.com/buildpacks/lifecycle/api"
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/system"
 	"github.com/golang/mock/gomock"
 	"github.com/heroku/color"
 	"github.com/pkg/errors"
@@ -68,16 +68,17 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 			mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/build-image", gomock.Any()).Return(fakeBuildImage, nil)
 		}
 
-		var createBuildpack = func(descriptor dist.BuildpackDescriptor) buildpack.Buildpack {
+		var createBuildpack = func(descriptor dist.BuildpackDescriptor) buildpack.BuildModule {
 			buildpack, err := ifakes.NewFakeBuildpack(descriptor, 0644)
 			h.AssertNil(t, err)
 			return buildpack
 		}
+
 		var shouldCallBuildpackDownloaderWith = func(uri string, buildpackDownloadOptions buildpack.DownloadOptions) {
 			buildpack := createBuildpack(dist.BuildpackDescriptor{
-				API:    api.MustParse("0.3"),
-				Info:   dist.BuildpackInfo{ID: "example/foo", Version: "1.1.0"},
-				Stacks: []dist.Stack{{ID: "some.stack.id"}},
+				WithAPI:    api.MustParse("0.3"),
+				WithInfo:   dist.ModuleInfo{ID: "example/foo", Version: "1.1.0"},
+				WithStacks: []dist.Stack{{ID: "some.stack.id"}},
 			})
 			mockBuildpackDownloader.EXPECT().Download(gomock.Any(), uri, gomock.Any()).Return(buildpack, nil, nil)
 		}
@@ -105,13 +106,18 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 
 			exampleBuildpackBlob := blob.NewBlob(filepath.Join("testdata", "buildpack"))
 			mockDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/bp-one.tgz").Return(exampleBuildpackBlob, nil).AnyTimes()
+			exampleExtensionBlob := blob.NewBlob(filepath.Join("testdata", "extension"))
+			mockDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/ext-one.tgz").Return(exampleExtensionBlob, nil).AnyTimes()
 			mockDownloader.EXPECT().Download(gomock.Any(), "some/buildpack/dir").Return(blob.NewBlob(filepath.Join("testdata", "buildpack")), nil).AnyTimes()
 			mockDownloader.EXPECT().Download(gomock.Any(), "file:///some-lifecycle").Return(blob.NewBlob(filepath.Join("testdata", "lifecycle", "platform-0.4")), nil).AnyTimes()
 			mockDownloader.EXPECT().Download(gomock.Any(), "file:///some-lifecycle-platform-0-1").Return(blob.NewBlob(filepath.Join("testdata", "lifecycle-platform-0.1")), nil).AnyTimes()
 
-			bp, err := buildpack.FromRootBlob(exampleBuildpackBlob, archive.DefaultTarWriterFactory())
+			bp, err := buildpack.FromBuildpackRootBlob(exampleBuildpackBlob, archive.DefaultTarWriterFactory(), nil)
 			h.AssertNil(t, err)
 			mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/bp-one.tgz", gomock.Any()).Return(bp, nil, nil).AnyTimes()
+			ext, err := buildpack.FromExtensionRootBlob(exampleExtensionBlob, archive.DefaultTarWriterFactory(), nil)
+			h.AssertNil(t, err)
+			mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/ext-one.tgz", gomock.Any()).Return(ext, nil, nil).AnyTimes()
 
 			subject, err = client.NewClient(
 				client.WithLogger(logger),
@@ -123,16 +129,16 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 			)
 			h.AssertNil(t, err)
 
-			mockDockerClient.EXPECT().Info(context.TODO()).Return(types.Info{OSType: "linux"}, nil).AnyTimes()
+			mockDockerClient.EXPECT().Info(context.TODO()).Return(system.Info{OSType: "linux"}, nil).AnyTimes()
 
 			opts = client.CreateBuilderOptions{
 				RelativeBaseDir: "/",
 				BuilderName:     "some/builder",
 				Config: pubbldr.Config{
 					Description: "Some description",
-					Buildpacks: []pubbldr.BuildpackConfig{
+					Buildpacks: []pubbldr.ModuleConfig{
 						{
-							BuildpackInfo: dist.BuildpackInfo{ID: "bp.one", Version: "1.2.3", Homepage: "http://one.buildpack"},
+							ModuleInfo: dist.ModuleInfo{ID: "bp.one", Version: "1.2.3", Homepage: "http://one.buildpack"},
 							ImageOrURI: dist.ImageOrURI{
 								BuildpackURI: dist.BuildpackURI{
 									URI: "https://example.fake/bp-one.tgz",
@@ -140,16 +146,37 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 							},
 						},
 					},
+					Extensions: []pubbldr.ModuleConfig{
+						{
+							ModuleInfo: dist.ModuleInfo{ID: "ext.one", Version: "1.2.3", Homepage: "http://one.extension"},
+							ImageOrURI: dist.ImageOrURI{
+								BuildpackURI: dist.BuildpackURI{
+									URI: "https://example.fake/ext-one.tgz",
+								},
+							},
+						},
+					},
 					Order: []dist.OrderEntry{{
-						Group: []dist.BuildpackRef{
-							{BuildpackInfo: dist.BuildpackInfo{ID: "bp.one", Version: "1.2.3"}, Optional: false},
+						Group: []dist.ModuleRef{
+							{ModuleInfo: dist.ModuleInfo{ID: "bp.one", Version: "1.2.3"}, Optional: false},
+						}},
+					},
+					OrderExtensions: []dist.OrderEntry{{
+						Group: []dist.ModuleRef{
+							{ModuleInfo: dist.ModuleInfo{ID: "ext.one", Version: "1.2.3"}, Optional: true},
 						}},
 					},
 					Stack: pubbldr.StackConfig{
-						ID:              "some.stack.id",
-						BuildImage:      "some/build-image",
-						RunImage:        "some/run-image",
-						RunImageMirrors: []string{"localhost:5000/some/run-image"},
+						ID: "some.stack.id",
+					},
+					Run: pubbldr.RunConfig{
+						Images: []pubbldr.RunImageConfig{{
+							Image:   "some/run-image",
+							Mirrors: []string{"localhost:5000/some/run-image"},
+						}},
+					},
+					Build: pubbldr.BuildConfig{
+						Image: "some/build-image",
 					},
 					Lifecycle: pubbldr.LifecycleConfig{URI: "file:///some-lifecycle"},
 				},
@@ -157,7 +184,7 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				PullPolicy: image.PullAlways,
 			}
 
-			tmpDir, err = ioutil.TempDir("", "create-builder-test")
+			tmpDir, err = os.MkdirTemp("", "create-builder-test")
 			h.AssertNil(t, err)
 		})
 
@@ -180,17 +207,19 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 		}
 
 		when("validating the builder config", func() {
-			it("should fail when the stack ID is empty", func() {
+			it("should not fail when the stack ID is empty", func() {
 				opts.Config.Stack.ID = ""
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
 
 				err := subject.CreateBuilder(context.TODO(), opts)
 
-				h.AssertError(t, err, "stack.id is required")
+				h.AssertNil(t, err)
 			})
 
 			it("should fail when the stack ID from the builder config does not match the stack ID from the build image", func() {
-				mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/build-image", image.FetchOptions{Daemon: true, PullPolicy: image.PullAlways}).Return(fakeBuildImage, nil)
 				h.AssertNil(t, fakeBuildImage.SetLabel("io.buildpacks.stack.id", "other.stack.id"))
+				prepareFetcherWithBuildImage()
 				prepareFetcherWithRunImages()
 
 				err := subject.CreateBuilder(context.TODO(), opts)
@@ -198,20 +227,56 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				h.AssertError(t, err, "stack 'some.stack.id' from builder config is incompatible with stack 'other.stack.id' from build image")
 			})
 
-			it("should fail when the build image is empty", func() {
+			it("should not fail when the stack is empty", func() {
+				opts.Config.Stack.ID = ""
 				opts.Config.Stack.BuildImage = ""
+				opts.Config.Stack.RunImage = ""
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
 
 				err := subject.CreateBuilder(context.TODO(), opts)
 
-				h.AssertError(t, err, "stack.build-image is required")
+				h.AssertNil(t, err)
 			})
 
-			it("should fail when the run image is empty", func() {
+			it("should fail when the run images and stack are empty", func() {
+				opts.Config.Stack.BuildImage = ""
 				opts.Config.Stack.RunImage = ""
+
+				opts.Config.Run = pubbldr.RunConfig{}
 
 				err := subject.CreateBuilder(context.TODO(), opts)
 
-				h.AssertError(t, err, "stack.run-image is required")
+				h.AssertError(t, err, "run.images are required")
+			})
+
+			it("should fail when the run images image and stack are empty", func() {
+				opts.Config.Stack.BuildImage = ""
+				opts.Config.Stack.RunImage = ""
+
+				opts.Config.Run = pubbldr.RunConfig{
+					Images: []pubbldr.RunImageConfig{{}},
+				}
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+
+				h.AssertError(t, err, "run.images.image is required")
+			})
+
+			it("should fail if stack and run image are different", func() {
+				opts.Config.Stack.RunImage = "some-other-stack-run-image"
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+
+				h.AssertError(t, err, "run.images and stack.run-image do not match")
+			})
+
+			it("should fail if stack and build image are different", func() {
+				opts.Config.Stack.BuildImage = "some-other-stack-build-image"
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+
+				h.AssertError(t, err, "build.image and stack.build-image do not match")
 			})
 
 			it("should fail when lifecycle version is not a semver", func() {
@@ -254,6 +319,26 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				err := subject.CreateBuilder(context.TODO(), opts)
 
 				h.AssertError(t, err, "buildpack from URI 'https://example.fake/bp-one.tgz' has version '1.2.3' which does not match version '0.0.0' from builder config")
+			})
+
+			it("should fail when extension ID does not match downloaded extension", func() {
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
+				opts.Config.Extensions[0].ID = "does.not.match"
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+
+				h.AssertError(t, err, "extension from URI 'https://example.fake/ext-one.tgz' has ID 'ext.one' which does not match ID 'does.not.match' from builder config")
+			})
+
+			it("should fail when extension version does not match downloaded extension", func() {
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
+				opts.Config.Extensions[0].Version = "0.0.0"
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+
+				h.AssertError(t, err, "extension from URI 'https://example.fake/ext-one.tgz' has version '1.2.3' which does not match version '0.0.0' from builder config")
 			})
 		})
 
@@ -360,6 +445,8 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 			when("windows containers", func() {
 				when("experimental enabled", func() {
 					it("succeeds", func() {
+						opts.Config.Extensions = nil      // TODO: downloading extensions doesn't work yet; to be implemented in https://github.com/buildpacks/pack/issues/1489
+						opts.Config.OrderExtensions = nil // TODO: downloading extensions doesn't work yet; to be implemented in https://github.com/buildpacks/pack/issues/1489
 						packClientWithExperimental, err := client.NewClient(
 							client.WithLogger(logger),
 							client.WithDownloader(mockDownloader),
@@ -384,7 +471,7 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 						prepareFetcherWithRunImages()
 
 						h.AssertNil(t, fakeBuildImage.SetOS("windows"))
-						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/build-image", image.FetchOptions{Daemon: true, PullPolicy: image.PullAlways}).Return(fakeBuildImage, nil)
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/build-image", gomock.Any()).Return(fakeBuildImage, nil)
 
 						err := subject.CreateBuilder(context.TODO(), opts)
 						h.AssertError(t, err, "failed to create builder: Windows containers support is currently experimental.")
@@ -443,8 +530,28 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				h.AssertNil(t, err)
 			})
 
+			it("should download from predetermined uri for arm64", func() {
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
+				opts.Config.Lifecycle.URI = ""
+				opts.Config.Lifecycle.Version = "3.4.5"
+				h.AssertNil(t, fakeBuildImage.SetArchitecture("arm64"))
+
+				mockDownloader.EXPECT().Download(
+					gomock.Any(),
+					"https://github.com/buildpacks/lifecycle/releases/download/v3.4.5/lifecycle-v3.4.5+linux.arm64.tgz",
+				).Return(
+					blob.NewBlob(filepath.Join("testdata", "lifecycle", "platform-0.4")), nil,
+				)
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+				h.AssertNil(t, err)
+			})
+
 			when("windows", func() {
 				it("should download from predetermined uri", func() {
+					opts.Config.Extensions = nil      // TODO: downloading extensions doesn't work yet; to be implemented in https://github.com/buildpacks/pack/issues/1489
+					opts.Config.OrderExtensions = nil // TODO: downloading extensions doesn't work yet; to be implemented in https://github.com/buildpacks/pack/issues/1489
 					packClientWithExperimental, err := client.NewClient(
 						client.WithLogger(logger),
 						client.WithDownloader(mockDownloader),
@@ -495,8 +602,32 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				h.AssertNil(t, err)
 			})
 
+			it("should download default lifecycle on arm64", func() {
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
+				opts.Config.Lifecycle.URI = ""
+				opts.Config.Lifecycle.Version = ""
+				h.AssertNil(t, fakeBuildImage.SetArchitecture("arm64"))
+
+				mockDownloader.EXPECT().Download(
+					gomock.Any(),
+					fmt.Sprintf(
+						"https://github.com/buildpacks/lifecycle/releases/download/v%s/lifecycle-v%s+linux.arm64.tgz",
+						builder.DefaultLifecycleVersion,
+						builder.DefaultLifecycleVersion,
+					),
+				).Return(
+					blob.NewBlob(filepath.Join("testdata", "lifecycle", "platform-0.4")), nil,
+				)
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+				h.AssertNil(t, err)
+			})
+
 			when("windows", func() {
 				it("should download default lifecycle", func() {
+					opts.Config.Extensions = nil      // TODO: downloading extensions doesn't work yet; to be implemented in https://github.com/buildpacks/pack/issues/1489
+					opts.Config.OrderExtensions = nil // TODO: downloading extensions doesn't work yet; to be implemented in https://github.com/buildpacks/pack/issues/1489
 					packClientWithExperimental, err := client.NewClient(
 						client.WithLogger(logger),
 						client.WithDownloader(mockDownloader),
@@ -561,17 +692,38 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 
 				bldr := successfullyCreateBuilder()
 
-				bpInfo := dist.BuildpackInfo{
+				bpInfo := dist.ModuleInfo{
 					ID:       "bp.one",
 					Version:  "1.2.3",
 					Homepage: "http://one.buildpack",
 				}
-				h.AssertEq(t, bldr.Buildpacks(), []dist.BuildpackInfo{bpInfo})
+				h.AssertEq(t, bldr.Buildpacks(), []dist.ModuleInfo{bpInfo})
 				bpInfo.Homepage = ""
 				h.AssertEq(t, bldr.Order(), dist.Order{{
-					Group: []dist.BuildpackRef{{
-						BuildpackInfo: bpInfo,
-						Optional:      false,
+					Group: []dist.ModuleRef{{
+						ModuleInfo: bpInfo,
+						Optional:   false,
+					}},
+				}})
+			})
+
+			it("should set extensions and order-extensions metadata", func() {
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
+
+				bldr := successfullyCreateBuilder()
+
+				extInfo := dist.ModuleInfo{
+					ID:       "ext.one",
+					Version:  "1.2.3",
+					Homepage: "http://one.extension",
+				}
+				h.AssertEq(t, bldr.Extensions(), []dist.ModuleInfo{extInfo})
+				extInfo.Homepage = ""
+				h.AssertEq(t, bldr.OrderExtensions(), dist.Order{{
+					Group: []dist.ModuleRef{{
+						ModuleInfo: extInfo,
+						Optional:   false, // extensions are always optional
 					}},
 				}})
 			})
@@ -602,34 +754,139 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				//nolint:staticcheck
 				h.AssertEq(t, bldr.LifecycleDescriptor().API.PlatformVersion.String(), "0.2")
 				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Buildpack.Deprecated.AsStrings(), []string{"0.2", "0.3"})
-				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Buildpack.Supported.AsStrings(), []string{"0.2", "0.3", "0.4"})
+				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Buildpack.Supported.AsStrings(), []string{"0.2", "0.3", "0.4", "0.9"})
 				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Platform.Deprecated.AsStrings(), []string{"0.2"})
 				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Platform.Supported.AsStrings(), []string{"0.3", "0.4"})
 			})
 
-			it("should warn when deprecated Buildpack API version used", func() {
+			it("should warn when deprecated Buildpack API version is used", func() {
 				prepareFetcherWithBuildImage()
 				prepareFetcherWithRunImages()
 				bldr := successfullyCreateBuilder()
 
 				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Buildpack.Deprecated.AsStrings(), []string{"0.2", "0.3"})
 				h.AssertContains(t, out.String(), fmt.Sprintf("Buildpack %s is using deprecated Buildpacks API version %s", style.Symbol("bp.one@1.2.3"), style.Symbol("0.3")))
+				h.AssertContains(t, out.String(), fmt.Sprintf("Extension %s is using deprecated Buildpacks API version %s", style.Symbol("ext.one@1.2.3"), style.Symbol("0.3")))
 			})
 
 			it("shouldn't warn when Buildpack API version used isn't deprecated", func() {
 				prepareFetcherWithBuildImage()
 				prepareFetcherWithRunImages()
 				opts.Config.Buildpacks[0].URI = "https://example.fake/bp-one-with-api-4.tgz"
+				opts.Config.Extensions[0].URI = "https://example.fake/ext-one-with-api-9.tgz"
 
 				buildpackBlob := blob.NewBlob(filepath.Join("testdata", "buildpack-api-0.4"))
-				buildpack, err := buildpack.FromRootBlob(buildpackBlob, archive.DefaultTarWriterFactory())
+				bp, err := buildpack.FromBuildpackRootBlob(buildpackBlob, archive.DefaultTarWriterFactory(), nil)
 				h.AssertNil(t, err)
-				mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/bp-one-with-api-4.tgz", gomock.Any()).Return(buildpack, nil, nil)
+				mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/bp-one-with-api-4.tgz", gomock.Any()).Return(bp, nil, nil)
+
+				extensionBlob := blob.NewBlob(filepath.Join("testdata", "extension-api-0.9"))
+				extension, err := buildpack.FromExtensionRootBlob(extensionBlob, archive.DefaultTarWriterFactory(), nil)
+				h.AssertNil(t, err)
+				mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/ext-one-with-api-9.tgz", gomock.Any()).Return(extension, nil, nil)
 
 				bldr := successfullyCreateBuilder()
 
 				h.AssertEq(t, bldr.LifecycleDescriptor().APIs.Buildpack.Deprecated.AsStrings(), []string{"0.2", "0.3"})
 				h.AssertNotContains(t, out.String(), "is using deprecated Buildpacks API version")
+			})
+
+			it("should set labels", func() {
+				opts.Labels = map[string]string{"test.label.one": "1", "test.label.two": "2"}
+				prepareFetcherWithBuildImage()
+				prepareFetcherWithRunImages()
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+				h.AssertNil(t, err)
+
+				imageLabels, err := fakeBuildImage.Labels()
+				h.AssertNil(t, err)
+				h.AssertEq(t, imageLabels["test.label.one"], "1")
+				h.AssertEq(t, imageLabels["test.label.two"], "2")
+			})
+
+			when("Buildpack dependencies are provided", func() {
+				var (
+					bp1v1          buildpack.BuildModule
+					bp1v2          buildpack.BuildModule
+					bp2v1          buildpack.BuildModule
+					bp2v2          buildpack.BuildModule
+					fakeLayerImage *h.FakeAddedLayerImage
+					err            error
+				)
+				it.Before(func() {
+					fakeLayerImage = &h.FakeAddedLayerImage{Image: fakeBuildImage}
+				})
+
+				var prepareBuildpackDependencies = func() []buildpack.BuildModule {
+					bp1v1Blob := blob.NewBlob(filepath.Join("testdata", "buildpack-non-deterministic", "buildpack-1-version-1"))
+					bp1v2Blob := blob.NewBlob(filepath.Join("testdata", "buildpack-non-deterministic", "buildpack-1-version-2"))
+					bp2v1Blob := blob.NewBlob(filepath.Join("testdata", "buildpack-non-deterministic", "buildpack-2-version-1"))
+					bp2v2Blob := blob.NewBlob(filepath.Join("testdata", "buildpack-non-deterministic", "buildpack-2-version-2"))
+
+					bp1v1, err = buildpack.FromBuildpackRootBlob(bp1v1Blob, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+
+					bp1v2, err = buildpack.FromBuildpackRootBlob(bp1v2Blob, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+
+					bp2v1, err = buildpack.FromBuildpackRootBlob(bp2v1Blob, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+
+					bp2v2, err = buildpack.FromBuildpackRootBlob(bp2v2Blob, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+
+					return []buildpack.BuildModule{bp2v2, bp2v1, bp1v1, bp1v2}
+				}
+
+				var successfullyCreateDeterministicBuilder = func() {
+					t.Helper()
+
+					err := subject.CreateBuilder(context.TODO(), opts)
+					h.AssertNil(t, err)
+					h.AssertEq(t, fakeLayerImage.IsSaved(), true)
+				}
+
+				it("should add dependencies buildpacks layers order by ID and version", func() {
+					mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/build-image", gomock.Any()).Return(fakeLayerImage, nil)
+					prepareFetcherWithRunImages()
+					opts.Config.Buildpacks[0].URI = "https://example.fake/bp-one-with-api-4.tgz"
+					opts.Config.Extensions[0].URI = "https://example.fake/ext-one-with-api-9.tgz"
+					bpDependencies := prepareBuildpackDependencies()
+
+					buildpackBlob := blob.NewBlob(filepath.Join("testdata", "buildpack-api-0.4"))
+					bp, err := buildpack.FromBuildpackRootBlob(buildpackBlob, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+					mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/bp-one-with-api-4.tgz", gomock.Any()).DoAndReturn(
+						func(ctx context.Context, buildpackURI string, opts buildpack.DownloadOptions) (buildpack.BuildModule, []buildpack.BuildModule, error) {
+							// test options
+							h.AssertEq(t, opts.Target.ValuesAsPlatform(), "linux/amd64")
+							return bp, bpDependencies, nil
+						})
+
+					extensionBlob := blob.NewBlob(filepath.Join("testdata", "extension-api-0.9"))
+					extension, err := buildpack.FromExtensionRootBlob(extensionBlob, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+					mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/ext-one-with-api-9.tgz", gomock.Any()).DoAndReturn(
+						func(ctx context.Context, buildpackURI string, opts buildpack.DownloadOptions) (buildpack.BuildModule, []buildpack.BuildModule, error) {
+							// test options
+							h.AssertEq(t, opts.Target.ValuesAsPlatform(), "linux/amd64")
+							return extension, nil, nil
+						})
+
+					successfullyCreateDeterministicBuilder()
+
+					layers := fakeLayerImage.AddedLayersOrder()
+					// Main buildpack + 4 dependencies + 1 extension
+					h.AssertEq(t, len(layers), 6)
+
+					// [0] bp.one.1.2.3.tar - main buildpack
+					h.AssertTrue(t, strings.Contains(layers[1], h.LayerFileName(bp1v1)))
+					h.AssertTrue(t, strings.Contains(layers[2], h.LayerFileName(bp1v2)))
+					h.AssertTrue(t, strings.Contains(layers[3], h.LayerFileName(bp2v1)))
+					h.AssertTrue(t, strings.Contains(layers[4], h.LayerFileName(bp2v2)))
+					// [5] ext.one.1.2.3.tar - extension
+				})
 			})
 		})
 
@@ -641,9 +898,25 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 			opts.Config.Buildpacks[0].URI = directoryPath
 
 			buildpackBlob := blob.NewBlob(directoryPath)
-			buildpack, err := buildpack.FromRootBlob(buildpackBlob, archive.DefaultTarWriterFactory())
+			buildpack, err := buildpack.FromBuildpackRootBlob(buildpackBlob, archive.DefaultTarWriterFactory(), nil)
 			h.AssertNil(t, err)
 			mockBuildpackDownloader.EXPECT().Download(gomock.Any(), directoryPath, gomock.Any()).Return(buildpack, nil, nil)
+
+			err = subject.CreateBuilder(context.TODO(), opts)
+			h.AssertNil(t, err)
+		})
+
+		it("supports directory extensions", func() {
+			prepareFetcherWithBuildImage()
+			prepareFetcherWithRunImages()
+			opts.RelativeBaseDir = ""
+			directoryPath := "testdata/extension"
+			opts.Config.Extensions[0].URI = directoryPath
+
+			extensionBlob := blob.NewBlob(directoryPath)
+			extension, err := buildpack.FromExtensionRootBlob(extensionBlob, archive.DefaultTarWriterFactory(), nil)
+			h.AssertNil(t, err)
+			mockBuildpackDownloader.EXPECT().Download(gomock.Any(), directoryPath, gomock.Any()).Return(extension, nil, nil)
 
 			err = subject.CreateBuilder(context.TODO(), opts)
 			h.AssertNil(t, err)
@@ -673,7 +946,7 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				buildpack, _, err := buildpack.BuildpacksFromOCILayoutBlob(blob.NewBlob(cnbFile))
 				h.AssertNil(t, err)
 				mockBuildpackDownloader.EXPECT().Download(gomock.Any(), cnbFile, gomock.Any()).Return(buildpack, nil, nil).AnyTimes()
-				opts.Config.Buildpacks = []pubbldr.BuildpackConfig{{
+				opts.Config.Buildpacks = []pubbldr.ModuleConfig{{
 					ImageOrURI: dist.ImageOrURI{BuildpackURI: dist.BuildpackURI{URI: cnbFile}},
 				}}
 			})
@@ -683,17 +956,17 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 				prepareFetcherWithRunImages()
 				bldr := successfullyCreateBuilder()
 
-				bpInfo := dist.BuildpackInfo{
+				bpInfo := dist.ModuleInfo{
 					ID:       "bp.one",
 					Version:  "1.2.3",
 					Homepage: "http://one.buildpack",
 				}
-				h.AssertEq(t, bldr.Buildpacks(), []dist.BuildpackInfo{bpInfo})
+				h.AssertEq(t, bldr.Buildpacks(), []dist.ModuleInfo{bpInfo})
 				bpInfo.Homepage = ""
 				h.AssertEq(t, bldr.Order(), dist.Order{{
-					Group: []dist.BuildpackRef{{
-						BuildpackInfo: bpInfo,
-						Optional:      false,
+					Group: []dist.ModuleRef{{
+						ModuleInfo: bpInfo,
+						Optional:   false,
 					}},
 				}})
 			})
@@ -711,7 +984,7 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 						opts.Registry = "some-registry"
 						opts.Config.Buildpacks = append(
 							opts.Config.Buildpacks,
-							pubbldr.BuildpackConfig{
+							pubbldr.ModuleConfig{
 								ImageOrURI: dist.ImageOrURI{
 									BuildpackURI: dist.BuildpackURI{
 										URI: "urn:cnb:registry:example/foo@1.1.0",
@@ -723,6 +996,127 @@ func testCreateBuilder(t *testing.T, when spec.G, it spec.S) {
 						shouldCallBuildpackDownloaderWith("urn:cnb:registry:example/foo@1.1.0", buildpack.DownloadOptions{Daemon: true, PullPolicy: image.PullAlways, RegistryName: "some-"})
 						h.AssertNil(t, subject.CreateBuilder(context.TODO(), opts))
 					})
+				})
+			})
+		})
+
+		when("flatten option is set", func() {
+			/*       1
+			 *    /    \
+			 *   2      3
+			 *         /  \
+			 *        4     5
+			 *	          /  \
+			 *           6   7
+			 */
+			var (
+				fakeLayerImage *h.FakeAddedLayerImage
+				err            error
+			)
+
+			var successfullyCreateFlattenBuilder = func() {
+				t.Helper()
+
+				err := subject.CreateBuilder(context.TODO(), opts)
+				h.AssertNil(t, err)
+				h.AssertEq(t, fakeLayerImage.IsSaved(), true)
+			}
+
+			it.Before(func() {
+				fakeLayerImage = &h.FakeAddedLayerImage{Image: fakeBuildImage}
+				mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/build-image", gomock.Any()).Return(fakeLayerImage, nil)
+
+				var depBPs []buildpack.BuildModule
+				blob1 := blob.NewBlob(filepath.Join("testdata", "buildpack-flatten", "buildpack-1"))
+				for i := 2; i <= 7; i++ {
+					b := blob.NewBlob(filepath.Join("testdata", "buildpack-flatten", fmt.Sprintf("buildpack-%d", i)))
+					bp, err := buildpack.FromBuildpackRootBlob(b, archive.DefaultTarWriterFactory(), nil)
+					h.AssertNil(t, err)
+					depBPs = append(depBPs, bp)
+				}
+				mockDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/flatten-bp-1.tgz").Return(blob1, nil).AnyTimes()
+
+				bp, err := buildpack.FromBuildpackRootBlob(blob1, archive.DefaultTarWriterFactory(), nil)
+				h.AssertNil(t, err)
+				mockBuildpackDownloader.EXPECT().Download(gomock.Any(), "https://example.fake/flatten-bp-1.tgz", gomock.Any()).Return(bp, depBPs, nil).AnyTimes()
+
+				opts = client.CreateBuilderOptions{
+					RelativeBaseDir: "/",
+					BuilderName:     "some/builder",
+					Config: pubbldr.Config{
+						Description: "Some description",
+						Buildpacks: []pubbldr.ModuleConfig{
+							{
+								ModuleInfo: dist.ModuleInfo{ID: "flatten/bp-1", Version: "1", Homepage: "http://buildpack-1"},
+								ImageOrURI: dist.ImageOrURI{
+									BuildpackURI: dist.BuildpackURI{
+										URI: "https://example.fake/flatten-bp-1.tgz",
+									},
+								},
+							},
+						},
+						Order: []dist.OrderEntry{{
+							Group: []dist.ModuleRef{
+								{ModuleInfo: dist.ModuleInfo{ID: "flatten/bp-2", Version: "2"}, Optional: false},
+								{ModuleInfo: dist.ModuleInfo{ID: "flatten/bp-4", Version: "4"}, Optional: false},
+								{ModuleInfo: dist.ModuleInfo{ID: "flatten/bp-6", Version: "6"}, Optional: false},
+								{ModuleInfo: dist.ModuleInfo{ID: "flatten/bp-7", Version: "7"}, Optional: false},
+							}},
+						},
+						Stack: pubbldr.StackConfig{
+							ID: "some.stack.id",
+						},
+						Run: pubbldr.RunConfig{
+							Images: []pubbldr.RunImageConfig{{
+								Image:   "some/run-image",
+								Mirrors: []string{"localhost:5000/some/run-image"},
+							}},
+						},
+						Build: pubbldr.BuildConfig{
+							Image: "some/build-image",
+						},
+						Lifecycle: pubbldr.LifecycleConfig{URI: "file:///some-lifecycle"},
+					},
+					Publish:    false,
+					PullPolicy: image.PullAlways,
+				}
+			})
+
+			when("flatten all", func() {
+				it("creates 1 layer for all buildpacks", func() {
+					prepareFetcherWithRunImages()
+					opts.Flatten, err = buildpack.ParseFlattenBuildModules([]string{"flatten/bp-1@1,flatten/bp-2@2,flatten/bp-4@4,flatten/bp-6@6,flatten/bp-7@7,flatten/bp-3@3,flatten/bp-5@5"})
+					h.AssertNil(t, err)
+
+					successfullyCreateFlattenBuilder()
+
+					layers := fakeLayerImage.AddedLayersOrder()
+
+					h.AssertEq(t, len(layers), 1)
+				})
+			})
+
+			when("only some modules are flattened", func() {
+				it("creates 1 layer for buildpacks [1,2,3,4,5,6] and 1 layer for buildpack [7]", func() {
+					prepareFetcherWithRunImages()
+					opts.Flatten, err = buildpack.ParseFlattenBuildModules([]string{"flatten/bp-1@1,flatten/bp-2@2,flatten/bp-4@4,flatten/bp-6@6,flatten/bp-3@3,flatten/bp-5@5"})
+					h.AssertNil(t, err)
+
+					successfullyCreateFlattenBuilder()
+
+					layers := fakeLayerImage.AddedLayersOrder()
+					h.AssertEq(t, len(layers), 2)
+				})
+
+				it("creates 1 layer for buildpacks [1,2,3] and 1 layer for [4,5,6] and 1 layer for [7]", func() {
+					prepareFetcherWithRunImages()
+					opts.Flatten, err = buildpack.ParseFlattenBuildModules([]string{"flatten/bp-1@1,flatten/bp-2@2,flatten/bp-3@3", "flatten/bp-4@4,flatten/bp-6@6,flatten/bp-5@5"})
+					h.AssertNil(t, err)
+
+					successfullyCreateFlattenBuilder()
+
+					layers := fakeLayerImage.AddedLayersOrder()
+					h.AssertEq(t, len(layers), 3)
 				})
 			})
 		})

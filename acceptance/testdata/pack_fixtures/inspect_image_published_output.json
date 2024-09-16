@@ -3,6 +3,7 @@
   "local_info": null,
   "remote_info": {
     "stack": "pack.test.stack",
+    "rebasable": {{.rebasable}},
     "base_image": {
       "top_layer": "{{.base_image_top_layer}}",
       "reference": "{{.base_image_ref}}"
@@ -21,6 +22,7 @@
         "version": "simple-layers-version"
       }
     ],
+    "extensions": null,
     "processes": [
       {
         "type": "web",
@@ -29,7 +31,8 @@
         "default": true,
         "args": [
           "8080"
-        ]
+        ],
+        "working-dir": "{{ ( StringsEscapeBackslash .image_workdir ) }}"
       },
       {
         "type": "hello",
@@ -38,7 +41,8 @@
         "default": false,
         "args": [
           {{ ( StringsJoin (StringsDoubleQuote .hello_args) "," ) }}
-        ]
+        ],
+        "working-dir": "{{ ( StringsEscapeBackslash .image_workdir ) }}"
       }
     ]
   }

@@ -4,9 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/buildpacks/imgutil/fakes"
@@ -184,14 +184,14 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 		apiVersion, err = api.NewVersion("0.2")
 		h.AssertNil(t, err)
 
-		tmpDir, err = ioutil.TempDir("", "inspectBuildpack")
+		tmpDir, err = os.MkdirTemp("", "inspectBuildpack")
 		h.AssertNil(t, err)
 
 		buildpackPath = filepath.Join(tmpDir, "buildpackTarFile.tar")
 
 		expectedInfo = &client.BuildpackInfo{
 			BuildpackMetadata: buildpack.Metadata{
-				BuildpackInfo: dist.BuildpackInfo{
+				ModuleInfo: dist.ModuleInfo{
 					ID:       "some/top-buildpack",
 					Version:  "0.0.1",
 					Name:     "top",
@@ -202,7 +202,7 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 					{ID: "io.buildpacks.stacks.second-stack"},
 				},
 			},
-			Buildpacks: []dist.BuildpackInfo{
+			Buildpacks: []dist.ModuleInfo{
 				{
 					ID:       "some/first-inner-buildpack",
 					Version:  "1.0.0",
@@ -227,9 +227,9 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 			},
 			Order: dist.Order{
 				{
-					Group: []dist.BuildpackRef{
+					Group: []dist.ModuleRef{
 						{
-							BuildpackInfo: dist.BuildpackInfo{
+							ModuleInfo: dist.ModuleInfo{
 								ID:       "some/top-buildpack",
 								Version:  "0.0.1",
 								Name:     "top",
@@ -240,7 +240,7 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 					},
 				},
 			},
-			BuildpackLayers: dist.BuildpackLayers{
+			BuildpackLayers: dist.ModuleLayers{
 				"some/first-inner-buildpack": {
 					"1.0.0": {
 						API: apiVersion,
@@ -250,16 +250,16 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 						},
 						Order: dist.Order{
 							{
-								Group: []dist.BuildpackRef{
+								Group: []dist.ModuleRef{
 									{
-										BuildpackInfo: dist.BuildpackInfo{
+										ModuleInfo: dist.ModuleInfo{
 											ID:      "some/first-inner-buildpack",
 											Version: "1.0.0",
 										},
 										Optional: false,
 									},
 									{
-										BuildpackInfo: dist.BuildpackInfo{
+										ModuleInfo: dist.ModuleInfo{
 											ID:      "some/second-inner-buildpack",
 											Version: "3.0.0",
 										},
@@ -268,9 +268,9 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 								},
 							},
 							{
-								Group: []dist.BuildpackRef{
+								Group: []dist.ModuleRef{
 									{
-										BuildpackInfo: dist.BuildpackInfo{
+										ModuleInfo: dist.ModuleInfo{
 											ID:      "some/second-inner-buildpack",
 											Version: "3.0.0",
 										},
@@ -308,16 +308,16 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 						API: apiVersion,
 						Order: dist.Order{
 							{
-								Group: []dist.BuildpackRef{
+								Group: []dist.ModuleRef{
 									{
-										BuildpackInfo: dist.BuildpackInfo{
+										ModuleInfo: dist.ModuleInfo{
 											ID:      "some/first-inner-buildpack",
 											Version: "1.0.0",
 										},
 										Optional: false,
 									},
 									{
-										BuildpackInfo: dist.BuildpackInfo{
+										ModuleInfo: dist.ModuleInfo{
 											ID:      "some/second-inner-buildpack",
 											Version: "2.0.0",
 										},
@@ -326,9 +326,9 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 								},
 							},
 							{
-								Group: []dist.BuildpackRef{
+								Group: []dist.ModuleRef{
 									{
-										BuildpackInfo: dist.BuildpackInfo{
+										ModuleInfo: dist.ModuleInfo{
 											ID:      "some/first-inner-buildpack",
 											Version: "1.0.0",
 										},
@@ -348,7 +348,10 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 
 	it.After(func() {
 		mockController.Finish()
-		h.AssertNil(t, os.RemoveAll(tmpDir))
+		err := os.RemoveAll(tmpDir)
+		if runtime.GOOS != "windows" {
+			h.AssertNil(t, err)
+		}
 	})
 
 	when("inspect-buildpack", func() {
@@ -394,7 +397,10 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertEq(t, info, expectedInfo)
 			})
+
+			// TODO add test case when buildpack is flattened
 		})
+
 		when("inspecting local buildpack archive", func() {
 			it.Before(func() {
 				expectedInfo.Location = buildpack.URILocator
@@ -414,6 +420,8 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertEq(t, info, expectedInfo)
 			})
+
+			// TODO add test case when buildpack is flattened
 		})
 
 		when("inspecting an image", func() {
@@ -493,7 +501,7 @@ func testInspectBuildpack(t *testing.T, when spec.G, it spec.S) {
 			when("archive is not a buildpack", func() {
 				it.Before(func() {
 					invalidBuildpackPath := filepath.Join(tmpDir, "fake-buildpack-path")
-					h.AssertNil(t, ioutil.WriteFile(invalidBuildpackPath, []byte("not a buildpack"), os.ModePerm))
+					h.AssertNil(t, os.WriteFile(invalidBuildpackPath, []byte("not a buildpack"), os.ModePerm))
 
 					mockDownloader.EXPECT().Download(gomock.Any(), "https://invalid/buildpack").Return(blob.NewBlob(invalidBuildpackPath), nil)
 				})

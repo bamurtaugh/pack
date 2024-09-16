@@ -9,13 +9,18 @@ import (
 // Note this method searches all objects in 'container' for containee
 // Contains is defined by the following relationship
 // basic data types (string, float, int,...):
-//    container == containee
+//
+//	container == containee
+//
 // maps:
-//    every key-value pair from containee is in container
-//    Ex: {"a": 1, "b": 2, "c": 3} contains {"a": 1, "c": 3}
+//
+//	every key-value pair from containee is in container
+//	Ex: {"a": 1, "b": 2, "c": 3} contains {"a": 1, "c": 3}
+//
 // arrays:
-//    every element in containee is present and ordered in an array in container
-//    Ex: [1, 1, 4, 3, 10, 4] contains [1, 3, 4 ]
+//
+//	every element in containee is present and ordered in an array in container
+//	Ex: [1, 1, 4, 3, 10, 4] contains [1, 3, 4 ]
 //
 // Limitaions:
 // Cannot handle the following types: Pointers, Func
@@ -72,8 +77,8 @@ func mapContains(v1, v2 reflect.Value, depth int) bool {
 		}
 	}
 	for _, k := range v1.MapKeys() {
-		kVal := v1.MapIndex(k)
-		if deepContains(kVal, v2, depth+1) {
+		val := v1.MapIndex(k)
+		if deepContains(val, v2, depth+1) {
 			return true
 		}
 	}

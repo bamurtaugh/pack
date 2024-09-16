@@ -2,9 +2,9 @@ package commands_test
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/buildpacks/pack/pkg/client"
@@ -37,10 +37,14 @@ func testBuildpackNewCommand(t *testing.T, when spec.G, it spec.S) {
 		mockClient     *testmocks.MockPackClient
 		tmpDir         string
 	)
+	targets := []dist.Target{{
+		OS:   runtime.GOOS,
+		Arch: runtime.GOARCH,
+	}}
 
 	it.Before(func() {
 		var err error
-		tmpDir, err = ioutil.TempDir("", "build-test")
+		tmpDir, err = os.MkdirTemp("", "build-test")
 		h.AssertNil(t, err)
 
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
@@ -57,14 +61,11 @@ func testBuildpackNewCommand(t *testing.T, when spec.G, it spec.S) {
 	when("BuildpackNew#Execute", func() {
 		it("uses the args to generate artifacts", func() {
 			mockClient.EXPECT().NewBuildpack(gomock.Any(), client.NewBuildpackOptions{
-				API:     "0.5",
+				API:     "0.8",
 				ID:      "example/some-cnb",
 				Path:    filepath.Join(tmpDir, "some-cnb"),
 				Version: "1.0.0",
-				Stacks: []dist.Stack{{
-					ID:     "io.buildpacks.stacks.bionic",
-					Mixins: []string{},
-				}},
+				Targets: targets,
 			}).Return(nil).MaxTimes(1)
 
 			path := filepath.Join(tmpDir, "some-cnb")
@@ -82,6 +83,125 @@ func testBuildpackNewCommand(t *testing.T, when spec.G, it spec.S) {
 			err = command.Execute()
 			h.AssertNotNil(t, err)
 			h.AssertContains(t, outBuf.String(), "ERROR: directory")
+		})
+
+		when("target flag is specified, ", func() {
+			it("it uses target to generate artifacts", func() {
+				mockClient.EXPECT().NewBuildpack(gomock.Any(), client.NewBuildpackOptions{
+					API:     "0.8",
+					ID:      "example/targets",
+					Path:    filepath.Join(tmpDir, "targets"),
+					Version: "1.0.0",
+					Targets: []dist.Target{{
+						OS:          "linux",
+						Arch:        "arm",
+						ArchVariant: "v6",
+						Distributions: []dist.Distribution{{
+							Name:    "ubuntu",
+							Version: "14.04",
+						}},
+					}},
+				}).Return(nil).MaxTimes(1)
+
+				path := filepath.Join(tmpDir, "targets")
+				command.SetArgs([]string{"--path", path, "example/targets", "--targets", "linux/arm/v6:ubuntu@14.04"})
+
+				err := command.Execute()
+				h.AssertNil(t, err)
+			})
+			it("it should show error when invalid [os]/[arch] passed", func() {
+				mockClient.EXPECT().NewBuildpack(gomock.Any(), client.NewBuildpackOptions{
+					API:     "0.8",
+					ID:      "example/targets",
+					Path:    filepath.Join(tmpDir, "targets"),
+					Version: "1.0.0",
+					Targets: []dist.Target{{
+						OS:          "os",
+						Arch:        "arm",
+						ArchVariant: "v6",
+						Distributions: []dist.Distribution{{
+							Name:    "ubuntu",
+							Version: "14.04",
+						}, {
+							Name:    "ubuntu",
+							Version: "16.04",
+						}},
+					}},
+				}).Return(nil).MaxTimes(1)
+
+				path := filepath.Join(tmpDir, "targets")
+				command.SetArgs([]string{"--path", path, "example/targets", "--targets", "os/arm/v6:ubuntu@14.04@16.04"})
+
+				err := command.Execute()
+				h.AssertNotNil(t, err)
+			})
+			when("it should", func() {
+				it("support format [os][/arch][/variant]:[name@version];[some-name@version]", func() {
+					mockClient.EXPECT().NewBuildpack(gomock.Any(), client.NewBuildpackOptions{
+						API:     "0.8",
+						ID:      "example/targets",
+						Path:    filepath.Join(tmpDir, "targets"),
+						Version: "1.0.0",
+						Targets: []dist.Target{
+							{
+								OS:          "linux",
+								Arch:        "arm",
+								ArchVariant: "v6",
+								Distributions: []dist.Distribution{
+									{
+										Name:    "ubuntu",
+										Version: "14.04",
+									},
+									{
+										Name:    "debian",
+										Version: "8.10",
+									},
+								},
+							},
+							{
+								OS:   "windows",
+								Arch: "amd64",
+								Distributions: []dist.Distribution{
+									{
+										Name:    "windows-nano",
+										Version: "10.0.19041.1415",
+									},
+								},
+							},
+						},
+					}).Return(nil).MaxTimes(1)
+
+					path := filepath.Join(tmpDir, "targets")
+					command.SetArgs([]string{"--path", path, "example/targets", "--targets", "linux/arm/v6:ubuntu@14.04;debian@8.10", "-t", "windows/amd64:windows-nano@10.0.19041.1415"})
+
+					err := command.Execute()
+					h.AssertNil(t, err)
+				})
+			})
+			when("stacks ", func() {
+				it("flag should show deprecated message when used", func() {
+					mockClient.EXPECT().NewBuildpack(gomock.Any(), client.NewBuildpackOptions{
+						API:     "0.8",
+						ID:      "example/stacks",
+						Path:    filepath.Join(tmpDir, "stacks"),
+						Version: "1.0.0",
+						Stacks: []dist.Stack{{
+							ID:     "io.buildpacks.stacks.jammy",
+							Mixins: []string{},
+						}},
+					}).Return(nil).MaxTimes(1)
+
+					path := filepath.Join(tmpDir, "stacks")
+					output := new(bytes.Buffer)
+					command.SetOut(output)
+					command.SetErr(output)
+					command.SetArgs([]string{"--path", path, "example/stacks", "--stacks", "io.buildpacks.stacks.jammy"})
+
+					err := command.Execute()
+					h.AssertNil(t, err)
+					h.AssertContains(t, output.String(), "Flag --stacks has been deprecated,")
+				})
+			})
 		})
 	})
 }

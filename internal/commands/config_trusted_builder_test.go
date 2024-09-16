@@ -3,7 +3,6 @@ package commands_test
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +38,7 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 		var err error
 
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
-		tempPackHome, err = ioutil.TempDir("", "pack-home")
+		tempPackHome, err = os.MkdirTemp("", "pack-home")
 		h.AssertNil(t, err)
 		configPath = filepath.Join(tempPackHome, "config.toml")
 
@@ -57,11 +56,13 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 			h.AssertNil(t, command.Execute())
 			h.AssertContainsAllInOrder(t,
 				outBuf,
-				"gcr.io/buildpacks/builder:v1",
-				"heroku/buildpacks:20",
-				"paketobuildpacks/builder:base",
-				"paketobuildpacks/builder:full",
-				"paketobuildpacks/builder:tiny",
+				"gcr.io/buildpacks/builder:google-22",
+				"heroku/builder:20",
+				"heroku/builder:22",
+				"heroku/builder:24",
+				"paketobuildpacks/builder-jammy-base",
+				"paketobuildpacks/builder-jammy-full",
+				"paketobuildpacks/builder-jammy-tiny",
 			)
 		})
 
@@ -70,11 +71,13 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 			h.AssertNil(t, command.Execute())
 			h.AssertContainsAllInOrder(t,
 				outBuf,
-				"gcr.io/buildpacks/builder:v1",
-				"heroku/buildpacks:20",
-				"paketobuildpacks/builder:base",
-				"paketobuildpacks/builder:full",
-				"paketobuildpacks/builder:tiny",
+				"gcr.io/buildpacks/builder:google-22",
+				"heroku/builder:20",
+				"heroku/builder:22",
+				"heroku/builder:24",
+				"paketobuildpacks/builder-jammy-base",
+				"paketobuildpacks/builder-jammy-full",
+				"paketobuildpacks/builder-jammy-tiny",
 			)
 		})
 	})
@@ -90,11 +93,13 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 			h.AssertNotContains(t, outBuf.String(), builderName)
 			h.AssertContainsAllInOrder(t,
 				outBuf,
-				"gcr.io/buildpacks/builder:v1",
-				"heroku/buildpacks:20",
-				"paketobuildpacks/builder:base",
-				"paketobuildpacks/builder:full",
-				"paketobuildpacks/builder:tiny",
+				"gcr.io/buildpacks/builder:google-22",
+				"heroku/builder:20",
+				"heroku/builder:22",
+				"heroku/builder:24",
+				"paketobuildpacks/builder-jammy-base",
+				"paketobuildpacks/builder-jammy-full",
+				"paketobuildpacks/builder-jammy-tiny",
 			)
 			outBuf.Reset()
 
@@ -105,12 +110,14 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 			h.AssertContainsAllInOrder(t,
 				outBuf,
-				"gcr.io/buildpacks/builder:v1",
+				"gcr.io/buildpacks/builder:google-22",
 				builderName,
-				"heroku/buildpacks:20",
-				"paketobuildpacks/builder:base",
-				"paketobuildpacks/builder:full",
-				"paketobuildpacks/builder:tiny",
+				"heroku/builder:20",
+				"heroku/builder:22",
+				"heroku/builder:24",
+				"paketobuildpacks/builder-jammy-base",
+				"paketobuildpacks/builder-jammy-full",
+				"paketobuildpacks/builder-jammy-tiny",
 			)
 		})
 	})
@@ -127,7 +134,7 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 		when("can't write to config path", func() {
 			it("fails", func() {
 				tempPath := filepath.Join(tempPackHome, "non-existent-file.toml")
-				h.AssertNil(t, ioutil.WriteFile(tempPath, []byte("something"), 0111))
+				h.AssertNil(t, os.WriteFile(tempPath, []byte("something"), 0111))
 				command = commands.ConfigTrustedBuilder(logger, config.Config{}, tempPath)
 				command.SetOut(logging.GetWriterForLevel(logger, logging.InfoLevel))
 				command.SetArgs(append(args, "some-builder"))
@@ -141,7 +148,7 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 					command.SetArgs(append(args, "some-builder"))
 					h.AssertNil(t, command.Execute())
 
-					b, err := ioutil.ReadFile(configPath)
+					b, err := os.ReadFile(configPath)
 					h.AssertNil(t, err)
 					h.AssertContains(t, string(b), `[[trusted-builders]]
   name = "some-builder"`)
@@ -152,13 +159,13 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 				it("does nothing", func() {
 					command.SetArgs(append(args, "some-already-trusted-builder"))
 					h.AssertNil(t, command.Execute())
-					oldContents, err := ioutil.ReadFile(configPath)
+					oldContents, err := os.ReadFile(configPath)
 					h.AssertNil(t, err)
 
 					command.SetArgs(append(args, "some-already-trusted-builder"))
 					h.AssertNil(t, command.Execute())
 
-					newContents, err := ioutil.ReadFile(configPath)
+					newContents, err := os.ReadFile(configPath)
 					h.AssertNil(t, err)
 					h.AssertEq(t, newContents, oldContents)
 				})
@@ -166,11 +173,11 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 			when("builder is a suggested builder", func() {
 				it("does nothing", func() {
-					h.AssertNil(t, ioutil.WriteFile(configPath, []byte(""), os.ModePerm))
+					h.AssertNil(t, os.WriteFile(configPath, []byte(""), os.ModePerm))
 
-					command.SetArgs(append(args, "paketobuildpacks/builder:base"))
+					command.SetArgs(append(args, "paketobuildpacks/builder-jammy-base"))
 					h.AssertNil(t, command.Execute())
-					oldContents, err := ioutil.ReadFile(configPath)
+					oldContents, err := os.ReadFile(configPath)
 					h.AssertNil(t, err)
 					h.AssertEq(t, string(oldContents), "")
 				})
@@ -211,7 +218,7 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertNil(t, command.Execute())
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertNotContains(t, string(b), builderName)
 
@@ -231,7 +238,7 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertNil(t, command.Execute())
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), stillTrustedBuilder)
 				h.AssertNotContains(t, string(b), untrustBuilder)
@@ -249,7 +256,7 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertNil(t, command.Execute())
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), stillTrustedBuilder)
 				h.AssertNotContains(t, string(b), neverTrustedBuilder)
@@ -263,12 +270,12 @@ func testTrustedBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 		when("builder is a suggested builder", func() {
 			it("does nothing and reports that ", func() {
-				builder := "paketobuildpacks/builder:base"
+				builder := "paketobuildpacks/builder-jammy-base"
 				command := commands.ConfigTrustedBuilder(logger, config.Config{}, configPath)
 				command.SetArgs(append(args, builder))
 
 				err := command.Execute()
-				h.AssertError(t, err, fmt.Sprintf("Builder %s is a suggested builder, and is trusted by default", style.Symbol(builder)))
+				h.AssertError(t, err, fmt.Sprintf("Builder %s is a known trusted builder. Currently pack doesn't support making these builders untrusted", style.Symbol(builder)))
 			})
 		})
 	})

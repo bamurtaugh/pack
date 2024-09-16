@@ -65,7 +65,7 @@ func testLabelManager(t *testing.T, when spec.G, it spec.S) {
 			expectedDescription    = "Test image description"
 			expectedRunImage       = "some/run-image"
 			expectedRunImageMirror = "gcr.io/some/default"
-			expectedBuildpacks     = []dist.BuildpackInfo{
+			expectedBuildpacks     = []dist.ModuleInfo{
 				{
 					ID:       "test.buildpack",
 					Version:  "test.buildpack.version",
@@ -325,14 +325,14 @@ func testLabelManager(t *testing.T, when spec.G, it spec.S) {
 
 			expectedOrder := dist.Order{
 				{
-					Group: []dist.BuildpackRef{
+					Group: []dist.ModuleRef{
 						{
-							BuildpackInfo: dist.BuildpackInfo{
+							ModuleInfo: dist.ModuleInfo{
 								ID: "buildpack-1-id",
 							},
 						},
 						{
-							BuildpackInfo: dist.BuildpackInfo{
+							ModuleInfo: dist.ModuleInfo{
 								ID:      "buildpack-2-id",
 								Version: "buildpack-2-version-1",
 							},
@@ -398,7 +398,92 @@ func testLabelManager(t *testing.T, when spec.G, it spec.S) {
 		})
 	})
 
-	when("BuildpackLayers", func() {
+	when("OrderExtensions", func() {
+		var rawOrder = `[{"group": [{"id": "buildpack-1-id", "optional": false}, {"id": "buildpack-2-id", "version": "buildpack-2-version-1", "optional": true}]}]`
+
+		it("returns the order", func() {
+			inspectable := newInspectable(returnForLabel(rawOrder))
+
+			labelManager := builder.NewLabelManager(inspectable)
+			mixins, err := labelManager.OrderExtensions()
+			assert.Nil(err)
+
+			expectedOrder := dist.Order{
+				{
+					Group: []dist.ModuleRef{
+						{
+							ModuleInfo: dist.ModuleInfo{
+								ID: "buildpack-1-id",
+							},
+						},
+						{
+							ModuleInfo: dist.ModuleInfo{
+								ID:      "buildpack-2-id",
+								Version: "buildpack-2-version-1",
+							},
+							Optional: true,
+						},
+					},
+				},
+			}
+
+			assert.Equal(mixins, expectedOrder)
+		})
+
+		it("requests the expected label", func() {
+			inspectable := newInspectable(returnForLabel(rawOrder))
+
+			labelManager := builder.NewLabelManager(inspectable)
+			_, err := labelManager.OrderExtensions()
+			assert.Nil(err)
+
+			assert.Equal(inspectable.ReceivedName, "io.buildpacks.buildpack.order-extensions")
+		})
+
+		when("inspectable return empty content for `Label`", func() {
+			it("returns an empty order object", func() {
+				inspectable := newInspectable(returnForLabel(""))
+
+				labelManager := builder.NewLabelManager(inspectable)
+				order, err := labelManager.OrderExtensions()
+				assert.Nil(err)
+
+				assert.Equal(order, dist.Order{})
+			})
+		})
+
+		when("inspectable returns an error for `Label`", func() {
+			it("returns a wrapped error", func() {
+				expectedError := errors.New("couldn't find label")
+
+				inspectable := newInspectable(errorForLabel(expectedError))
+
+				labelManager := builder.NewLabelManager(inspectable)
+				_, err := labelManager.OrderExtensions()
+
+				assert.ErrorWithMessage(
+					err,
+					"getting label io.buildpacks.buildpack.order-extensions: couldn't find label",
+				)
+			})
+		})
+
+		when("inspectable returns invalid json for `Label`", func() {
+			it("returns a wrapped error", func() {
+				inspectable := newInspectable(returnForLabel("{"))
+
+				labelManager := builder.NewLabelManager(inspectable)
+				_, err := labelManager.OrderExtensions()
+
+				assert.ErrorWithMessage(
+					err,
+					"parsing label content for io.buildpacks.buildpack.order-extensions: unexpected end of JSON input",
+				)
+			})
+		})
+	})
+
+	when("ModuleLayers", func() {
 		var rawLayers = `
 {
   "buildpack-1-id": {
@@ -421,13 +506,13 @@ func testLabelManager(t *testing.T, when spec.G, it spec.S) {
 			layers, err := labelManager.BuildpackLayers()
 			assert.Nil(err)
 
-			expectedLayers := dist.BuildpackLayers{
+			expectedLayers := dist.ModuleLayers{
 				"buildpack-1-id": {
-					"buildpack-1-version-1": dist.BuildpackLayerInfo{
+					"buildpack-1-version-1": dist.ModuleLayerInfo{
 						API:         api.MustParse("0.1"),
 						LayerDiffID: "sha256:buildpack-1-version-1-diff-id",
 					},
-					"buildpack-1-version-2": dist.BuildpackLayerInfo{
+					"buildpack-1-version-2": dist.ModuleLayerInfo{
 						API:         api.MustParse("0.2"),
 						LayerDiffID: "sha256:buildpack-1-version-2-diff-id",
 					},
@@ -455,7 +540,7 @@ func testLabelManager(t *testing.T, when spec.G, it spec.S) {
 				layers, err := labelManager.BuildpackLayers()
 				assert.Nil(err)
 
-				assert.Equal(layers, dist.BuildpackLayers{})
+				assert.Equal(layers, dist.ModuleLayers{})
 			})
 		})
 

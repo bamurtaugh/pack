@@ -5,17 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/buildpacks/lifecycle/platform"
-	"github.com/docker/docker/api/types"
+	"github.com/buildpacks/lifecycle/platform/files"
 	dcontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
@@ -31,8 +28,6 @@ import (
 
 // TestContainerOperations are integration tests for the container operations against a docker daemon
 func TestContainerOperations(t *testing.T) {
-	rand.Seed(time.Now().UTC().UnixNano())
-
 	color.Disable(true)
 	defer color.Disable(false)
 
@@ -89,7 +84,20 @@ func testContainerOps(t *testing.T, when spec.G, it spec.S) {
 			h.AssertNil(t, err)
 			defer cleanupContainer(ctx, ctr.ID)
 
-			copyDirOp := build.CopyDir(filepath.Join("testdata", "fake-app"), containerDir, 123, 456, osType, false, nil)
+			// chmod in case umask sets the wrong bits during a `git clone`.
+			dir := filepath.Join("testdata", "fake-app")
+			err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() {
+					return nil
+				}
+
+				return os.Chmod(path, 0644)
+			})
+			h.AssertNil(t, err)
+			copyDirOp := build.CopyDir(dir, containerDir, 123, 456, osType, false, nil)
 
 			var outBuf, errBuf bytes.Buffer
 			err = copyDirOp(ctrClient, ctx, ctr.ID, &outBuf, &errBuf)
@@ -160,17 +168,9 @@ lrwxrwxrwx    1 123      456 (.*) fake-app-symlink -> fake-app-file
 (.*)    <DIR>          ...                    some-vol
 `)
 				} else {
-					if runtime.GOOS == "windows" {
-						// Expected LCOW results
-						h.AssertContainsMatch(t, outBuf.String(), `
+					h.AssertContainsMatch(t, outBuf.String(), `
 drwxrwxrwx    2 123      456 (.*) some-vol
 `)
-					} else {
-						// Expected results
-						h.AssertContainsMatch(t, outBuf.String(), `
-drwsrwsrwt    2 123      456 (.*) some-vol
-`)
-					}
 				}
 			})
 		})
@@ -267,30 +267,88 @@ drwsrwsrwt    2 123      456 (.*) some-vol
 			defer cleanupContainer(ctx, ctr.ID)
 
 			copyDirOp := build.CopyDir(filepath.Join("testdata", "fake-app"), containerDir, 123, 456, osType, false, nil)
-			err = copyDirOp(ctrClient, ctx, ctr.ID, ioutil.Discard, ioutil.Discard)
+			err = copyDirOp(ctrClient, ctx, ctr.ID, io.Discard, io.Discard)
 			h.AssertNil(t, err)
 
-			tarDestination, err := ioutil.TempFile("", "pack.container.ops.test.")
+			tarDestination, err := os.CreateTemp("", "pack.container.ops.test.")
 			h.AssertNil(t, err)
 			defer os.RemoveAll(tarDestination.Name())
 
 			handler := func(reader io.ReadCloser) error {
 				defer reader.Close()
 
-				contents, err := ioutil.ReadAll(reader)
+				contents, err := io.ReadAll(reader)
 				h.AssertNil(t, err)
 
-				err = ioutil.WriteFile(tarDestination.Name(), contents, 0600)
+				err = os.WriteFile(tarDestination.Name(), contents, 0600)
 				h.AssertNil(t, err)
 
 				return nil
 			}
 
 			copyOutDirsOp := build.CopyOut(handler, containerDir)
-			err = copyOutDirsOp(ctrClient, ctx, ctr.ID, ioutil.Discard, ioutil.Discard)
+			err = copyOutDirsOp(ctrClient, ctx, ctr.ID, io.Discard, io.Discard)
 			h.AssertNil(t, err)
 
-			err = container.RunWithHandler(ctx, ctrClient, ctr.ID, container.DefaultHandler(ioutil.Discard, ioutil.Discard))
+			err = container.RunWithHandler(ctx, ctrClient, ctr.ID, container.DefaultHandler(io.Discard, io.Discard))
+			h.AssertNil(t, err)
+
+			separator := "/"
+			if osType == "windows" {
+				separator = `\`
+			}
+
+			h.AssertTarball(t, tarDestination.Name())
+			h.AssertTarHasFile(t, tarDestination.Name(), fmt.Sprintf("some-vol%sfake-app-file", separator))
+			h.AssertTarHasFile(t, tarDestination.Name(), fmt.Sprintf("some-vol%sfake-app-symlink", separator))
+			h.AssertTarHasFile(t, tarDestination.Name(), fmt.Sprintf("some-vol%sfile-to-ignore", separator))
+		})
+	})
+
+	when("#CopyOutMaybe", func() {
+		it("reads the contents of a container directory", func() {
+			h.SkipIf(t, osType == "windows", "copying directories out of windows containers not yet supported")
+
+			containerDir := "/some-vol"
+			if osType == "windows" {
+				containerDir = `c:\some-vol`
+			}
+
+			ctrCmd := []string{"ls", "-al", "/some-vol"}
+			if osType == "windows" {
+				ctrCmd = []string{"cmd", "/c", `dir /q /s c:\some-vol`}
+			}
+
+			ctx := context.Background()
+			ctr, err := createContainer(ctx, imageName, containerDir, osType, ctrCmd...)
+			h.AssertNil(t, err)
+			defer cleanupContainer(ctx, ctr.ID)
+
+			copyDirOp := build.CopyDir(filepath.Join("testdata", "fake-app"), containerDir, 123, 456, osType, false, nil)
+			err = copyDirOp(ctrClient, ctx, ctr.ID, io.Discard, io.Discard)
+			h.AssertNil(t, err)
+
+			tarDestination, err := os.CreateTemp("", "pack.container.ops.test.")
+			h.AssertNil(t, err)
+			defer os.RemoveAll(tarDestination.Name())
+
+			handler := func(reader io.ReadCloser) error {
+				defer reader.Close()
+
+				contents, err := io.ReadAll(reader)
+				h.AssertNil(t, err)
+
+				err = os.WriteFile(tarDestination.Name(), contents, 0600)
+				h.AssertNil(t, err)
+
+				return nil
+			}
+
+			copyOutDirsOp := build.CopyOutMaybe(handler, containerDir)
+			err = copyOutDirsOp(ctrClient, ctx, ctr.ID, io.Discard, io.Discard)
+			h.AssertNil(t, err)
+
+			err = container.RunWithHandler(ctx, ctrClient, ctr.ID, container.DefaultHandler(io.Discard, io.Discard))
 			h.AssertNil(t, err)
 
 			separator := "/"
@@ -391,6 +449,102 @@ drwsrwsrwt    2 123      456 (.*) some-vol
 		})
 	})
 
+	when("#WriteRunToml", func() {
+		it("writes file", func() {
+			containerDir := "/layers-vol"
+			containerPath := "/layers-vol/run.toml"
+			if osType == "windows" {
+				containerDir = `c:\layers-vol`
+				containerPath = `c:\layers-vol\run.toml`
+			}
+
+			ctrCmd := []string{"ls", "-al", "/layers-vol/run.toml"}
+			if osType == "windows" {
+				ctrCmd = []string{"cmd", "/c", `dir /q /n c:\layers-vol\run.toml`}
+			}
+			ctx := context.Background()
+			ctr, err := createContainer(ctx, imageName, containerDir, osType, ctrCmd...)
+			h.AssertNil(t, err)
+			defer cleanupContainer(ctx, ctr.ID)
+
+			writeOp := build.WriteRunToml(containerPath, []builder.RunImageMetadata{builder.RunImageMetadata{
+				Image: "image-1",
+				Mirrors: []string{
+					"mirror-1",
+					"mirror-2",
+				},
+			},
+			}, osType)
+
+			var outBuf, errBuf bytes.Buffer
+			err = writeOp(ctrClient, ctx, ctr.ID, &outBuf, &errBuf)
+			h.AssertNil(t, err)
+
+			err = container.RunWithHandler(ctx, ctrClient, ctr.ID, container.DefaultHandler(&outBuf, &errBuf))
+			h.AssertNil(t, err)
+
+			h.AssertEq(t, errBuf.String(), "")
+			if osType == "windows" {
+				h.AssertContains(t, outBuf.String(), `01/01/1980  12:00 AM                68 ...                    run.toml`)
+			} else {
+				h.AssertContains(t, outBuf.String(), `-rwxr-xr-x    1 root     root            68 Jan  1  1980 /layers-vol/run.toml`)
+			}
+		})
+
+		it("has expected contents", func() {
+			containerDir := "/layers-vol"
+			containerPath := "/layers-vol/run.toml"
+			if osType == "windows" {
+				containerDir = `c:\layers-vol`
+				containerPath = `c:\layers-vol\run.toml`
+			}
+
+			ctrCmd := []string{"cat", "/layers-vol/run.toml"}
+			if osType == "windows" {
+				ctrCmd = []string{"cmd", "/c", `type c:\layers-vol\run.toml`}
+			}
+
+			ctx := context.Background()
+			ctr, err := createContainer(ctx, imageName, containerDir, osType, ctrCmd...)
+			h.AssertNil(t, err)
+			defer cleanupContainer(ctx, ctr.ID)
+
+			writeOp := build.WriteRunToml(containerPath, []builder.RunImageMetadata{
+				{
+					Image: "image-1",
+					Mirrors: []string{
+						"mirror-1",
+						"mirror-2",
+					},
+				},
+				{
+					Image: "image-2",
+					Mirrors: []string{
+						"mirror-3",
+						"mirror-4",
+					},
+				},
+			}, osType)
+
+			var outBuf, errBuf bytes.Buffer
+			err = writeOp(ctrClient, ctx, ctr.ID, &outBuf, &errBuf)
+			h.AssertNil(t, err)
+
+			err = container.RunWithHandler(ctx, ctrClient, ctr.ID, container.DefaultHandler(&outBuf, &errBuf))
+			h.AssertNil(t, err)
+
+			h.AssertEq(t, errBuf.String(), "")
+			h.AssertContains(t, outBuf.String(), `[[images]]
+  image = "image-1"
+  mirrors = ["mirror-1", "mirror-2"]
+
+[[images]]
+  image = "image-2"
+  mirrors = ["mirror-3", "mirror-4"]
+`)
+		})
+	})
+
 	when("#WriteProjectMetadata", func() {
 		it("writes file", func() {
 			containerDir := "/layers-vol"
@@ -409,8 +563,8 @@ drwsrwsrwt    2 123      456 (.*) some-vol
 			h.AssertNil(t, err)
 			defer cleanupContainer(ctx, ctr.ID)
 
-			writeOp := build.WriteProjectMetadata(p, platform.ProjectMetadata{
-				Source: &platform.ProjectSource{
+			writeOp := build.WriteProjectMetadata(p, files.ProjectMetadata{
+				Source: &files.ProjectSource{
 					Type: "project",
 					Version: map[string]interface{}{
 						"declared": "1.0.2",
@@ -454,8 +608,8 @@ drwsrwsrwt    2 123      456 (.*) some-vol
 			h.AssertNil(t, err)
 			defer cleanupContainer(ctx, ctr.ID)
 
-			writeOp := build.WriteProjectMetadata(p, platform.ProjectMetadata{
-				Source: &platform.ProjectSource{
+			writeOp := build.WriteProjectMetadata(p, files.ProjectMetadata{
+				Source: &files.ProjectSource{
 					Type: "project",
 					Version: map[string]interface{}{
 						"declared": "1.0.2",
@@ -483,6 +637,7 @@ drwsrwsrwt    2 123      456 (.*) some-vol
 `)
 		})
 	})
+
 	when("#EnsureVolumeAccess", func() {
 		it("changes owner of volume", func() {
 			h.SkipIf(t, osType != "windows", "no-op for linux")
@@ -528,7 +683,7 @@ drwsrwsrwt    2 123      456 (.*) some-vol
 	})
 }
 
-func createContainer(ctx context.Context, imageName, containerDir, osType string, cmd ...string) (dcontainer.ContainerCreateCreatedBody, error) {
+func createContainer(ctx context.Context, imageName, containerDir, osType string, cmd ...string) (dcontainer.CreateResponse, error) {
 	isolationType := dcontainer.IsolationDefault
 	if osType == "windows" {
 		isolationType = dcontainer.IsolationProcess
@@ -553,7 +708,7 @@ func cleanupContainer(ctx context.Context, ctrID string) {
 	}
 
 	// remove container
-	err = ctrClient.ContainerRemove(ctx, ctrID, types.ContainerRemoveOptions{})
+	err = ctrClient.ContainerRemove(ctx, ctrID, dcontainer.RemoveOptions{})
 	if err != nil {
 		return
 	}

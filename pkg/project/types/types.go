@@ -28,13 +28,18 @@ type Build struct {
 	Buildpacks []Buildpack `toml:"buildpacks"`
 	Env        []EnvVar    `toml:"env"`
 	Builder    string      `toml:"builder"`
+	Pre        GroupAddition
+	Post       GroupAddition
 }
 
 type Project struct {
-	Name      string    `toml:"name"`
-	Version   string    `toml:"version"`
-	SourceURL string    `toml:"source-url"`
-	Licenses  []License `toml:"licenses"`
+	ID               string    `toml:"id"`
+	Name             string    `toml:"name"`
+	Version          string    `toml:"version"`
+	Authors          []string  `toml:"authors"`
+	DocumentationURL string    `toml:"documentation-url"`
+	SourceURL        string    `toml:"source-url"`
+	Licenses         []License `toml:"licenses"`
 }
 
 type License struct {
@@ -47,4 +52,8 @@ type Descriptor struct {
 	Build         Build                  `toml:"build"`
 	Metadata      map[string]interface{} `toml:"metadata"`
 	SchemaVersion *api.Version
+}
+
+type GroupAddition struct {
+	Buildpacks []Buildpack `toml:"group"`
 }

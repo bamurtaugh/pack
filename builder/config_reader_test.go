@@ -1,7 +1,6 @@
 package builder_test
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +28,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 		)
 
 		it.Before(func() {
-			tmpDir, err = ioutil.TempDir("", "config-test")
+			tmpDir, err = os.MkdirTemp("", "config-test")
 			h.AssertNil(t, err)
 			builderConfigPath = filepath.Join(tmpDir, "builder.toml")
 		})
@@ -40,7 +39,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 
 		when("file is written properly", func() {
 			it.Before(func() {
-				h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(`
+				h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(`
 [[buildpacks]]
   id = "buildpack/1"
   version = "0.0.1"
@@ -90,7 +89,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 		when("detecting warnings", func() {
 			when("'groups' field is used", func() {
 				it.Before(func() {
-					h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(`
+					h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(`
 [[buildpacks]]
   id = "some.buildpack"
   version = "some.buildpack.version"
@@ -115,7 +114,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 
 			when("'order' is missing or empty", func() {
 				it.Before(func() {
-					h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(`
+					h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(`
 [[buildpacks]]
   id = "some.buildpack"
   version = "some.buildpack.version"
@@ -132,7 +131,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 
 			when("unknown buildpack key is present", func() {
 				it.Before(func() {
-					h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(`
+					h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(`
 [[buildpacks]]
 url = "noop-buildpack.tgz"
 `), 0666))
@@ -146,7 +145,7 @@ url = "noop-buildpack.tgz"
 
 			when("unknown array table is present", func() {
 				it.Before(func() {
-					h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(`
+					h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(`
 [[buidlpack]]
 uri = "noop-buildpack.tgz"
 `), 0666))
@@ -167,13 +166,13 @@ uri = "noop-buildpack.tgz"
 			testBuildImage = "test-build-image"
 		)
 
-		it("returns error if no id", func() {
+		it("returns error if no stack id and no run images", func() {
 			config := builder.Config{
 				Stack: builder.StackConfig{
 					BuildImage: testBuildImage,
 					RunImage:   testRunImage,
 				}}
-			h.AssertError(t, builder.ValidateConfig(config), "stack.id is required")
+			h.AssertError(t, builder.ValidateConfig(config), "run.images are required")
 		})
 
 		it("returns error if no build image", func() {
@@ -182,7 +181,7 @@ uri = "noop-buildpack.tgz"
 					ID:       testID,
 					RunImage: testRunImage,
 				}}
-			h.AssertError(t, builder.ValidateConfig(config), "stack.build-image is required")
+			h.AssertError(t, builder.ValidateConfig(config), "build.image is required")
 		})
 
 		it("returns error if no run image", func() {
@@ -191,7 +190,150 @@ uri = "noop-buildpack.tgz"
 					ID:         testID,
 					BuildImage: testBuildImage,
 				}}
-			h.AssertError(t, builder.ValidateConfig(config), "stack.run-image is required")
+			h.AssertError(t, builder.ValidateConfig(config), "run.images are required")
+		})
+
+		it("returns error if no run images image", func() {
+			config := builder.Config{
+				Build: builder.BuildConfig{
+					Image: testBuildImage,
+				},
+				Run: builder.RunConfig{
+					Images: []builder.RunImageConfig{{
+						Image: "",
+					}},
+				}}
+			h.AssertError(t, builder.ValidateConfig(config), "run.images.image is required")
+		})
+
+		it("returns error if no stack or run image", func() {
+			config := builder.Config{
+				Build: builder.BuildConfig{
+					Image: testBuildImage,
+				}}
+			h.AssertError(t, builder.ValidateConfig(config), "run.images are required")
+		})
+
+		it("returns error if no stack and no build image", func() {
+			config := builder.Config{
+				Run: builder.RunConfig{
+					Images: []builder.RunImageConfig{{
+						Image: testBuildImage,
+					}},
+				}}
+			h.AssertError(t, builder.ValidateConfig(config), "build.image is required")
+		})
+
+		it("returns error if no stack, run, or build image", func() {
+			config := builder.Config{}
+			h.AssertError(t, builder.ValidateConfig(config), "build.image is required")
+		})
+	})
+	when("#ParseBuildConfigEnv()", func() {
+		it("should return an error when name is not defined", func() {
+			_, _, err := builder.ParseBuildConfigEnv([]builder.BuildConfigEnv{
+				{
+					Name:  "",
+					Value: "vaiue",
+				},
+			}, "")
+			h.AssertNotNil(t, err)
+		})
+		it("should warn when the value is nil or empty string", func() {
+			env, warn, err := builder.ParseBuildConfigEnv([]builder.BuildConfigEnv{
+				{
+					Name:   "key",
+					Value:  "",
+					Suffix: "override",
+				},
+			}, "")
+
+			h.AssertNotNil(t, warn)
+			h.AssertNil(t, err)
+			h.AssertMapContains[string, string](t, env, h.NewKeyValue[string, string]("key.override", ""))
+		})
+		it("should return an error when unknown suffix is specified", func() {
+			_, _, err := builder.ParseBuildConfigEnv([]builder.BuildConfigEnv{
+				{
+					Name:   "key",
+					Value:  "",
+					Suffix: "invalid",
+				},
+			}, "")
+
+			h.AssertNotNil(t, err)
+		})
+		it("should override and show a warning when suffix or delim is defined multiple times", func() {
+			env, warn, err := builder.ParseBuildConfigEnv([]builder.BuildConfigEnv{
+				{
+					Name:   "key1",
+					Value:  "value1",
+					Suffix: "append",
+					Delim:  "%",
+				},
+				{
+					Name:   "key1",
+					Value:  "value2",
+					Suffix: "append",
+					Delim:  ",",
+				},
+				{
+					Name:   "key1",
+					Value:  "value3",
+					Suffix: "default",
+					Delim:  ";",
+				},
+				{
+					Name:   "key1",
+					Value:  "value4",
+					Suffix: "prepend",
+					Delim:  ":",
+				},
+			}, "")
+
+			h.AssertNotNil(t, warn)
+			h.AssertNil(t, err)
+			h.AssertMapContains[string, string](
+				t,
+				env,
+				h.NewKeyValue[string, string]("key1.append", "value2"),
+				h.NewKeyValue[string, string]("key1.default", "value3"),
+				h.NewKeyValue[string, string]("key1.prepend", "value4"),
+				h.NewKeyValue[string, string]("key1.delim", ":"),
+			)
+			h.AssertMapNotContains[string, string](
+				t,
+				env,
+				h.NewKeyValue[string, string]("key1.append", "value1"),
+				h.NewKeyValue[string, string]("key1.delim", "%"),
+				h.NewKeyValue[string, string]("key1.delim", ","),
+				h.NewKeyValue[string, string]("key1.delim", ";"),
+			)
+		})
+		it("should return an error when `suffix` is defined as `append` or `prepend` without a `delim`", func() {
+			_, warn, err := builder.ParseBuildConfigEnv([]builder.BuildConfigEnv{
+				{
+					Name:   "key",
+					Value:  "value",
+					Suffix: "append",
+				},
+			}, "")
+
+			h.AssertNotNil(t, warn)
+			h.AssertNotNil(t, err)
+		})
+		it("when suffix is NONE or omitted should default to `override`", func() {
+			env, warn, err := builder.ParseBuildConfigEnv([]builder.BuildConfigEnv{
+				{
+					Name:   "key",
+					Value:  "value",
+					Suffix: "",
+				},
+			}, "")
+
+			h.AssertNotNil(t, warn)
+			h.AssertNil(t, err)
+			h.AssertMapContains[string, string](t, env, h.NewKeyValue[string, string]("key", "value"))
 		})
 	})
 }

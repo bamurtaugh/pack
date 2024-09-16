@@ -5,8 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
@@ -15,7 +13,8 @@ import (
 	"strconv"
 	"sync"
 	"testing"
-	"time"
+
+	"github.com/docker/docker/api/types/volume"
 
 	"github.com/buildpacks/imgutil/local"
 	"github.com/buildpacks/lifecycle/auth"
@@ -44,8 +43,6 @@ var (
 
 // TestPhase is a integration test suite to ensure that the phase options are propagated to the container.
 func TestPhase(t *testing.T) {
-	rand.Seed(time.Now().UTC().UnixNano())
-
 	color.Disable(true)
 	defer color.Disable(false)
 
@@ -141,8 +138,8 @@ func testPhase(t *testing.T, when spec.G, it spec.S) {
 
 			it("runs the phase with provided handlers", func() {
 				var actual string
-				var handler container.Handler = func(bodyChan <-chan dcontainer.ContainerWaitOKBody, errChan <-chan error, reader io.Reader) error {
-					data, _ := ioutil.ReadAll(reader)
+				var handler container.Handler = func(bodyChan <-chan dcontainer.WaitResponse, errChan <-chan error, reader io.Reader) error {
+					data, _ := io.ReadAll(reader)
 					actual = string(data)
 					return nil
 				}
@@ -225,7 +222,7 @@ func testPhase(t *testing.T, when spec.G, it spec.S) {
 					it.Before(func() {
 						h.SkipIf(t, os.Getuid() == 0, "Skipping b/c current user is root")
 
-						tmpFakeAppDir, err = ioutil.TempDir("", "fake-app")
+						tmpFakeAppDir, err = os.MkdirTemp("", "fake-app")
 						h.AssertNil(t, err)
 						dirWithoutAccess = filepath.Join(tmpFakeAppDir, "bad-dir")
 						err := os.MkdirAll(dirWithoutAccess, 0222)
@@ -299,7 +296,7 @@ func testPhase(t *testing.T, when spec.G, it spec.S) {
 					})
 
 					it("allows daemon access inside the container", func() {
-						tmp, err := ioutil.TempDir("", "testSocketDir")
+						tmp, err := os.MkdirTemp("", "testSocketDir")
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -371,10 +368,10 @@ func testPhase(t *testing.T, when spec.G, it spec.S) {
 					phase := phaseFactory.New(configProvider)
 					assertRunSucceeds(t, phase, &outBuf, &errBuf)
 					h.AssertContains(t, outBuf.String(), "binds test")
-					body, err := docker.VolumeList(context.TODO(), filters.NewArgs(filters.KeyValuePair{
+					body, err := docker.VolumeList(context.TODO(), volume.ListOptions{Filters: filters.NewArgs(filters.KeyValuePair{
 						Key:   "name",
 						Value: "some-volume",
-					}))
+					})})
 					h.AssertNil(t, err)
 					h.AssertEq(t, len(body.Volumes), 1)
 				})
@@ -426,17 +423,17 @@ func testPhase(t *testing.T, when spec.G, it spec.S) {
 
 			when("#WithPostContainerRunOperations", func() {
 				it("runs the operation after the container command", func() {
-					tarDestinationPath, err := ioutil.TempFile("", "pack.phase.test.")
+					tarDestinationPath, err := os.CreateTemp("", "pack.phase.test.")
 					h.AssertNil(t, err)
 					defer os.RemoveAll(tarDestinationPath.Name())
 
 					handler := func(reader io.ReadCloser) error {
 						defer reader.Close()
 
-						contents, err := ioutil.ReadAll(reader)
+						contents, err := io.ReadAll(reader)
 						h.AssertNil(t, err)
 
-						err = ioutil.WriteFile(tarDestinationPath.Name(), contents, 0600)
+						err = os.WriteFile(tarDestinationPath.Name(), contents, 0600)
 						h.AssertNil(t, err)
 						return nil
 					}
@@ -464,21 +461,21 @@ func testPhase(t *testing.T, when spec.G, it spec.S) {
 		})
 
 		it("should delete the layers volume", func() {
-			body, err := docker.VolumeList(context.TODO(),
-				filters.NewArgs(filters.KeyValuePair{
+			body, err := docker.VolumeList(context.TODO(), volume.ListOptions{
+				Filters: filters.NewArgs(filters.KeyValuePair{
 					Key:   "name",
 					Value: lifecycleExec.LayersVolume(),
-				}))
+				})})
 			h.AssertNil(t, err)
 			h.AssertEq(t, len(body.Volumes), 0)
 		})
 
 		it("should delete the app volume", func() {
-			body, err := docker.VolumeList(context.TODO(),
-				filters.NewArgs(filters.KeyValuePair{
+			body, err := docker.VolumeList(context.TODO(), volume.ListOptions{
+				Filters: filters.NewArgs(filters.KeyValuePair{
 					Key:   "name",
 					Value: lifecycleExec.AppVolume(),
-				}))
+				})})
 			h.AssertNil(t, err)
 			h.AssertEq(t, len(body.Volumes), 0)
 		})
@@ -535,7 +532,7 @@ func CreateFakeLifecycleExecution(logger logging.Logger, docker client.CommonAPI
 		termui = &fakes.FakeTermui{HandlerFunc: handler[0]}
 	}
 
-	return build.NewLifecycleExecution(logger, docker, build.LifecycleOptions{
+	return build.NewLifecycleExecution(logger, docker, "some-temp-dir", build.LifecycleOptions{
 		AppPath:     appDir,
 		Builder:     fakeBuilder,
 		HTTPProxy:   "some-http-proxy",

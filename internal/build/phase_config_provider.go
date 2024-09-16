@@ -34,9 +34,14 @@ type PhaseConfigProvider struct {
 }
 
 func NewPhaseConfigProvider(name string, lifecycleExec *LifecycleExecution, ops ...PhaseConfigProviderOperation) *PhaseConfigProvider {
+	hostConf := new(container.HostConfig)
+	hostConf.UsernsMode = "host"
+	if lifecycleExec.os != "windows" {
+		hostConf.SecurityOpt = []string{"no-new-privileges=true"}
+	}
 	provider := &PhaseConfigProvider{
 		ctrConf:     new(container.Config),
-		hostConf:    new(container.HostConfig),
+		hostConf:    hostConf,
 		name:        name,
 		os:          lifecycleExec.os,
 		infoWriter:  logging.GetWriterForLevel(lifecycleExec.logger, logging.InfoLevel),
@@ -63,12 +68,13 @@ func NewPhaseConfigProvider(name string, lifecycleExec *LifecycleExecution, ops 
 		op(provider)
 	}
 
+	provider.ctrConf.Entrypoint = []string{""} // override entrypoint in case it is set
 	provider.ctrConf.Cmd = append([]string{"/cnb/lifecycle/" + name}, provider.ctrConf.Cmd...)
 
-	lifecycleExec.logger.Debugf("Running the %s on OS %s with:", style.Symbol(provider.Name()), style.Symbol(provider.os))
+	lifecycleExec.logger.Debugf("Running the %s on OS %s from image %s with:", style.Symbol(provider.Name()), style.Symbol(provider.os), style.Symbol(provider.ctrConf.Image))
 	lifecycleExec.logger.Debug("Container Settings:")
 	lifecycleExec.logger.Debugf("  Args: %s", style.Symbol(strings.Join(provider.ctrConf.Cmd, " ")))
-	lifecycleExec.logger.Debugf("  System Envs: %s", style.Symbol(strings.Join(provider.ctrConf.Env, " ")))
+	lifecycleExec.logger.Debugf("  System Envs: %s", style.Symbol(strings.Join(sanitized(provider.ctrConf.Env), " ")))
 	lifecycleExec.logger.Debugf("  Image: %s", style.Symbol(provider.ctrConf.Image))
 	lifecycleExec.logger.Debugf("  User: %s", style.Symbol(provider.ctrConf.User))
 	lifecycleExec.logger.Debugf("  Labels: %s", style.Symbol(fmt.Sprintf("%s", provider.ctrConf.Labels)))
@@ -82,6 +88,18 @@ func NewPhaseConfigProvider(name string, lifecycleExec *LifecycleExecution, ops 
 	}
 
 	return provider
+}
+
+func sanitized(origEnv []string) []string {
+	var sanitizedEnv []string
+	for _, env := range origEnv {
+		if strings.HasPrefix(env, "CNB_REGISTRY_AUTH") {
+			sanitizedEnv = append(sanitizedEnv, "CNB_REGISTRY_AUTH=<redacted>")
+			continue
+		}
+		sanitizedEnv = append(sanitizedEnv, env)
+	}
+	return sanitizedEnv
 }
 
 func (p *PhaseConfigProvider) ContainerConfig() *container.Config {

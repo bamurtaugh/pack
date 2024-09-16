@@ -3,7 +3,6 @@ package commands_test
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +38,7 @@ func testUntrustBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
 
-		tempPackHome, err = ioutil.TempDir("", "pack-home")
+		tempPackHome, err = os.MkdirTemp("", "pack-home")
 		h.AssertNil(t, err)
 		configPath = filepath.Join(tempPackHome, "config.toml")
 		configManager = newConfigManager(t, configPath)
@@ -73,7 +72,7 @@ func testUntrustBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertNil(t, command.Execute())
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertNotContains(t, string(b), builderName)
 
@@ -93,7 +92,7 @@ func testUntrustBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertNil(t, command.Execute())
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), stillTrustedBuilder)
 				h.AssertNotContains(t, string(b), untrustBuilder)
@@ -111,7 +110,7 @@ func testUntrustBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 				h.AssertNil(t, command.Execute())
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), stillTrustedBuilder)
 				h.AssertNotContains(t, string(b), neverTrustedBuilder)
@@ -125,12 +124,12 @@ func testUntrustBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 		when("builder is a suggested builder", func() {
 			it("does nothing and reports that ", func() {
-				builder := "paketobuildpacks/builder:base"
+				builder := "paketobuildpacks/builder-jammy-base"
 				command := commands.UntrustBuilder(logger, config.Config{}, configPath)
 				command.SetArgs([]string{builder})
 
 				err := command.Execute()
-				h.AssertError(t, err, fmt.Sprintf("Builder %s is a suggested builder, and is trusted by default", style.Symbol(builder)))
+				h.AssertError(t, err, fmt.Sprintf("Builder %s is a known trusted builder. Currently pack doesn't support making these builders untrusted", style.Symbol(builder)))
 			})
 		})
 	})

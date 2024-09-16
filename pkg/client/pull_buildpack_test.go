@@ -3,9 +3,10 @@ package client_test
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/buildpacks/imgutil/fakes"
@@ -108,7 +109,7 @@ func testPullBuildpack(t *testing.T, when spec.G, it spec.S) {
 
 		it.Before(func() {
 			var err error
-			tmpDir, err = ioutil.TempDir("", "registry")
+			tmpDir, err = os.MkdirTemp("", "registry")
 			h.AssertNil(t, err)
 
 			packHome = filepath.Join(tmpDir, ".pack")
@@ -140,7 +141,9 @@ func testPullBuildpack(t *testing.T, when spec.G, it spec.S) {
 		it.After(func() {
 			os.Unsetenv("PACK_HOME")
 			err := os.RemoveAll(tmpDir)
-			h.AssertNil(t, err)
+			if runtime.GOOS != "windows" && err != nil && strings.Contains(err.Error(), "The process cannot access the file because it is being used by another process.") {
+				h.AssertNil(t, err)
+			}
 		})
 
 		it("should fetch the image", func() {

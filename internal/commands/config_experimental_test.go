@@ -3,7 +3,6 @@ package commands_test
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +38,7 @@ func testConfigExperimental(t *testing.T, when spec.G, it spec.S) {
 		var err error
 
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
-		tempPackHome, err = ioutil.TempDir("", "pack-home")
+		tempPackHome, err = os.MkdirTemp("", "pack-home")
 		h.AssertNil(t, err)
 		configPath = filepath.Join(tempPackHome, "config.toml")
 
@@ -78,6 +77,10 @@ func testConfigExperimental(t *testing.T, when spec.G, it spec.S) {
 				cfg, err := config.Read(configPath)
 				h.AssertNil(t, err)
 				h.AssertEq(t, cfg.Experimental, true)
+
+				// oci layout repo is configured
+				layoutDir := filepath.Join(filepath.Dir(configPath), "layout-repo")
+				h.AssertEq(t, cfg.LayoutRepositoryDir, layoutDir)
 			})
 
 			it("sets false if provided", func() {
@@ -88,6 +91,9 @@ func testConfigExperimental(t *testing.T, when spec.G, it spec.S) {
 				cfg, err := config.Read(configPath)
 				h.AssertNil(t, err)
 				h.AssertEq(t, cfg.Experimental, false)
+
+				// oci layout repo is cleaned
+				h.AssertEq(t, cfg.LayoutRepositoryDir, "")
 			})
 
 			it("returns error if invalid value provided", func() {

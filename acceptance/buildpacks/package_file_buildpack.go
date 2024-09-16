@@ -6,7 +6,6 @@ package buildpacks
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +20,10 @@ type PackageFile struct {
 	pack                 *invoke.PackInvoker
 	destination          string
 	sourceConfigLocation string
-	buildpacks           []TestBuildpack
+	buildpacks           []TestBuildModule
 }
 
-func (p *PackageFile) SetBuildpacks(buildpacks []TestBuildpack) {
+func (p *PackageFile) SetBuildpacks(buildpacks []TestBuildModule) {
 	p.buildpacks = buildpacks
 }
 
@@ -54,7 +53,7 @@ func (p PackageFile) Prepare(sourceDir, _ string) error {
 	p.testObject.Helper()
 	p.testObject.Log("creating package file from:", sourceDir)
 
-	tmpDir, err := ioutil.TempDir("", "package-buildpacks")
+	tmpDir, err := os.MkdirTemp("", "package-buildpacks")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for package buildpacks: %w", err)
 	}

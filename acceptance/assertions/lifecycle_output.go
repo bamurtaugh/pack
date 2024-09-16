@@ -6,6 +6,7 @@ package assertions
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	h "github.com/buildpacks/pack/testhelpers"
@@ -70,8 +71,27 @@ func (l LifecycleOutputAssertionManager) IncludesSeparatePhases() {
 	l.assert.ContainsAll(l.output, "[detector]", "[analyzer]", "[builder]", "[exporter]")
 }
 
-func (l LifecycleOutputAssertionManager) IncludesLifecycleImageTag(tag string) {
+func (l LifecycleOutputAssertionManager) IncludesSeparatePhasesWithBuildExtension() {
 	l.testObject.Helper()
 
-	l.assert.Contains(l.output, tag)
+	// Earlier pack versions print `[extender]`, later pack versions print `[extender (build)]`.
+	// Removing the `]` for the extend phase allows us to navigate compat suite complexity without undo headache.
+	// When previous pack is old enough, we can make the matcher more precise.
+	l.assert.ContainsAll(l.output, "[detector]", "[analyzer]", "[extender", "[exporter]")
+}
+
+func (l LifecycleOutputAssertionManager) IncludesSeparatePhasesWithRunExtension() {
+	l.testObject.Helper()
+
+	l.assert.ContainsAll(l.output, "[detector]", "[analyzer]", "[extender (run)]", "[exporter]")
+}
+
+func (l LifecycleOutputAssertionManager) IncludesTagOrEphemeralLifecycle(tag string) {
+	l.testObject.Helper()
+
+	if !strings.Contains(l.output, tag) {
+		if !strings.Contains(l.output, "pack.local/lifecyle") {
+			l.testObject.Fatalf("Unable to locate reference to lifecycle image within output")
+		}
+	}
 }

@@ -7,30 +7,22 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/buildpacks/pack/internal/builder"
-
 	"github.com/buildpacks/pack/testhelpers"
 )
 
-type BuildpackManager struct {
+type BuildModuleManager struct {
 	testObject *testing.T
 	assert     testhelpers.AssertionManager
 	sourceDir  string
 }
 
-type BuildpackManagerModifier func(b *BuildpackManager)
+type BuildModuleManagerModifier func(b *BuildModuleManager)
 
-func WithBuildpackAPIVersion(apiVersion string) func(b *BuildpackManager) {
-	return func(b *BuildpackManager) {
-		b.sourceDir = filepath.Join("testdata", "mock_buildpacks", apiVersion)
-	}
-}
-
-func NewBuildpackManager(t *testing.T, assert testhelpers.AssertionManager, modifiers ...BuildpackManagerModifier) BuildpackManager {
-	m := BuildpackManager{
+func NewBuildModuleManager(t *testing.T, assert testhelpers.AssertionManager, modifiers ...BuildModuleManagerModifier) BuildModuleManager {
+	m := BuildModuleManager{
 		testObject: t,
 		assert:     assert,
-		sourceDir:  filepath.Join("testdata", "mock_buildpacks", builder.DefaultBuildpackAPIVersion),
+		sourceDir:  filepath.Join("testdata", "mock_buildpacks"),
 	}
 
 	for _, mod := range modifiers {
@@ -40,26 +32,26 @@ func NewBuildpackManager(t *testing.T, assert testhelpers.AssertionManager, modi
 	return m
 }
 
-type TestBuildpack interface {
+type TestBuildModule interface {
 	Prepare(source, destination string) error
 }
 
-func (b BuildpackManager) PrepareBuildpacks(destination string, buildpacks ...TestBuildpack) {
+func (b BuildModuleManager) PrepareBuildModules(destination string, modules ...TestBuildModule) {
 	b.testObject.Helper()
 
-	for _, buildpack := range buildpacks {
-		err := buildpack.Prepare(b.sourceDir, destination)
+	for _, module := range modules {
+		err := module.Prepare(b.sourceDir, destination)
 		b.assert.Nil(err)
 	}
 }
 
 type Modifiable interface {
 	SetPublish()
-	SetBuildpacks([]TestBuildpack)
+	SetBuildpacks([]TestBuildModule)
 }
 type PackageModifier func(p Modifiable)
 
-func WithRequiredBuildpacks(buildpacks ...TestBuildpack) PackageModifier {
+func WithRequiredBuildpacks(buildpacks ...TestBuildModule) PackageModifier {
 	return func(p Modifiable) {
 		p.SetBuildpacks(buildpacks)
 	}

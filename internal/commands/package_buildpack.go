@@ -22,7 +22,7 @@ func PackageBuildpack(logger logging.Logger, cfg config.Config, packager Buildpa
 	cmd := &cobra.Command{
 		Use:     `package-buildpack <name> --config <package-config-path>`,
 		Hidden:  true,
-		Args:    cobra.ExactValidArgs(1),
+		Args:    cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		Short:   "Package buildpack in OCI format.",
 		Example: "pack package-buildpack my-buildpack --config ./package.toml",
 		Long: "package-buildpack allows users to package (a) buildpack(s) into OCI format, which can then to be hosted in " +
@@ -33,7 +33,7 @@ func PackageBuildpack(logger logging.Logger, cfg config.Config, packager Buildpa
 		RunE: logError(logger, func(cmd *cobra.Command, args []string) error {
 			deprecationWarning(logger, "package-buildpack", "buildpack package")
 
-			if err := validateBuildpackPackageFlags(&flags); err != nil {
+			if err := validateBuildpackPackageFlags(cfg, &flags); err != nil {
 				return err
 			}
 
@@ -85,7 +85,7 @@ func PackageBuildpack(logger logging.Logger, cfg config.Config, packager Buildpa
 	cmd.Flags().StringVarP(&flags.PackageTomlPath, "config", "c", "", "Path to package TOML config (required)")
 
 	cmd.Flags().StringVarP(&flags.Format, "format", "f", "", `Format to save package as ("image" or "file")`)
-	cmd.Flags().BoolVar(&flags.Publish, "publish", false, `Publish to registry (applies to "--format=image" only)`)
+	cmd.Flags().BoolVar(&flags.Publish, "publish", false, `Publish the buildpack directly to the container registry specified in <name>, instead of the daemon (applies to "--format=image" only).`)
 	cmd.Flags().StringVar(&flags.Policy, "pull-policy", "", "Pull policy to use. Accepted values are always, never, and if-not-present. The default is always")
 	cmd.Flags().StringVarP(&flags.BuildpackRegistry, "buildpack-registry", "r", "", "Buildpack Registry name")
 

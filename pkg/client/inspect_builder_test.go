@@ -140,7 +140,15 @@ func testInspectBuilder(t *testing.T, when spec.G, it spec.S) {
 	"buildpack": {"deprecated": ["0.1"], "supported": ["1.2", "1.3"]},
 	"platform": {"deprecated": [], "supported": ["2.3", "2.4"]}
   }},
-  "createdBy": {"name": "pack", "version": "1.2.3"}
+  "createdBy": {"name": "pack", "version": "1.2.3"},
+  "images": [
+    {
+      "image": "some/run-image",
+      "mirrors": [
+        "gcr.io/some/default"
+      ]
+    }
+  ]
 }`))
 
 						assert.Succeeds(builderImage.SetLabel(
@@ -221,12 +229,11 @@ func testInspectBuilder(t *testing.T, when spec.G, it spec.S) {
 						assert.Nil(err)
 
 						want := BuilderInfo{
-							Description:     "Some description",
-							Stack:           "test.stack.id",
-							Mixins:          []string{"mixinOne", "mixinThree", "build:mixinTwo", "build:mixinFour"},
-							RunImage:        "some/run-image",
-							RunImageMirrors: []string{"gcr.io/some/default"},
-							Buildpacks: []dist.BuildpackInfo{
+							Description: "Some description",
+							Stack:       "test.stack.id",
+							Mixins:      []string{"mixinOne", "mixinThree", "build:mixinTwo", "build:mixinFour"},
+							RunImages:   []pubbldr.RunImageConfig{{Image: "some/run-image", Mirrors: []string{"gcr.io/some/default"}}},
+							Buildpacks: []dist.ModuleInfo{
 								{
 									ID:       "test.bp.one",
 									Version:  "test.bp.one.version",
@@ -247,36 +254,36 @@ func testInspectBuilder(t *testing.T, when spec.G, it spec.S) {
 								{
 									GroupDetectionOrder: pubbldr.DetectionOrder{
 										{
-											BuildpackRef: dist.BuildpackRef{
-												BuildpackInfo: dist.BuildpackInfo{ID: "test.nested", Version: "test.nested.version"},
-												Optional:      false,
+											ModuleRef: dist.ModuleRef{
+												ModuleInfo: dist.ModuleInfo{ID: "test.nested", Version: "test.nested.version"},
+												Optional:   false,
 											},
 										},
 										{
-											BuildpackRef: dist.BuildpackRef{
-												BuildpackInfo: dist.BuildpackInfo{ID: "test.bp.two"},
-												Optional:      true,
+											ModuleRef: dist.ModuleRef{
+												ModuleInfo: dist.ModuleInfo{ID: "test.bp.two"},
+												Optional:   true,
 											},
 										},
 									},
 								},
 							},
-							BuildpackLayers: map[string]map[string]dist.BuildpackLayerInfo{
+							BuildpackLayers: map[string]map[string]dist.ModuleLayerInfo{
 								"test.nested": {
 									"test.nested.version": {
 										API: apiVersion,
 										Order: dist.Order{
 											{
-												Group: []dist.BuildpackRef{
+												Group: []dist.ModuleRef{
 													{
-														BuildpackInfo: dist.BuildpackInfo{
+														ModuleInfo: dist.ModuleInfo{
 															ID:      "test.bp.one",
 															Version: "test.bp.one.version",
 														},
 														Optional: false,
 													},
 													{
-														BuildpackInfo: dist.BuildpackInfo{
+														ModuleInfo: dist.ModuleInfo{
 															ID:      "test.bp.two",
 															Version: "test.bp.two.version",
 														},
@@ -357,22 +364,22 @@ func testInspectBuilder(t *testing.T, when spec.G, it spec.S) {
 								{
 									GroupDetectionOrder: pubbldr.DetectionOrder{
 										{
-											BuildpackRef: dist.BuildpackRef{
-												BuildpackInfo: dist.BuildpackInfo{ID: "test.nested", Version: "test.nested.version"},
-												Optional:      false,
+											ModuleRef: dist.ModuleRef{
+												ModuleInfo: dist.ModuleInfo{ID: "test.nested", Version: "test.nested.version"},
+												Optional:   false,
 											},
 											GroupDetectionOrder: pubbldr.DetectionOrder{
 												{
-													BuildpackRef: dist.BuildpackRef{
-														BuildpackInfo: dist.BuildpackInfo{
+													ModuleRef: dist.ModuleRef{
+														ModuleInfo: dist.ModuleInfo{
 															ID:      "test.bp.one",
 															Version: "test.bp.one.version",
 														},
 													},
 												},
 												{
-													BuildpackRef: dist.BuildpackRef{
-														BuildpackInfo: dist.BuildpackInfo{
+													ModuleRef: dist.ModuleRef{
+														ModuleInfo: dist.ModuleInfo{
 															ID:      "test.bp.two",
 															Version: "test.bp.two.version",
 														},
@@ -381,9 +388,9 @@ func testInspectBuilder(t *testing.T, when spec.G, it spec.S) {
 											},
 										},
 										{
-											BuildpackRef: dist.BuildpackRef{
-												BuildpackInfo: dist.BuildpackInfo{ID: "test.bp.two"},
-												Optional:      true,
+											ModuleRef: dist.ModuleRef{
+												ModuleInfo: dist.ModuleInfo{ID: "test.bp.two"},
+												Optional:   true,
 											},
 										},
 									},
@@ -396,6 +403,8 @@ func testInspectBuilder(t *testing.T, when spec.G, it spec.S) {
 						})
 					})
 				})
+
+				// TODO add test case when builder is flattened
 			})
 		}
 	})

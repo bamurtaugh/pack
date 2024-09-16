@@ -2,12 +2,9 @@ package archive_test
 
 import (
 	"archive/tar"
-	"io/ioutil"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/buildpacks/pack/pkg/archive"
 
@@ -21,7 +18,6 @@ import (
 func TestTarBuilder(t *testing.T) {
 	color.Disable(true)
 	defer color.Disable(false)
-	rand.Seed(time.Now().UTC().UnixNano())
 	spec.Run(t, "TarBuilder", testTarBuilder, spec.Sequential(), spec.Report(report.Terminal{}))
 }
 
@@ -33,7 +29,7 @@ func testTarBuilder(t *testing.T, when spec.G, it spec.S) {
 
 	it.Before(func() {
 		var err error
-		tmpDir, err = ioutil.TempDir("", "tar-builder-test")
+		tmpDir, err = os.MkdirTemp("", "tar-builder-test")
 		h.AssertNil(t, err)
 		tarBuilder = archive.TarBuilder{}
 	})

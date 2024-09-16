@@ -17,13 +17,29 @@ const defaultOS = "linux"
 // Config encapsulates the possible configuration options for buildpackage creation.
 type Config struct {
 	Buildpack    dist.BuildpackURI `toml:"buildpack"`
+	Extension    dist.BuildpackURI `toml:"extension"`
 	Dependencies []dist.ImageOrURI `toml:"dependencies"`
-	Platform     dist.Platform     `toml:"platform"`
+	// deprecated
+	Platform dist.Platform `toml:"platform"`
+
+	// Define targets for composite buildpacks
+	Targets []dist.Target `toml:"targets"`
 }
 
 func DefaultConfig() Config {
 	return Config{
 		Buildpack: dist.BuildpackURI{
+			URI: ".",
+		},
+		Platform: dist.Platform{
+			OS: defaultOS,
+		},
+	}
+}
+
+func DefaultExtensionConfig() Config {
+	return Config{
+		Extension: dist.BuildpackURI{
 			URI: ".",
 		},
 		Platform: dist.Platform{
@@ -61,8 +77,11 @@ func (r *ConfigReader) Read(path string) (Config, error) {
 		)
 	}
 
-	if packageConfig.Buildpack.URI == "" {
-		return packageConfig, errors.Errorf("missing %s configuration", style.Symbol("buildpack.uri"))
+	if packageConfig.Buildpack.URI == "" && packageConfig.Extension.URI == "" {
+		if packageConfig.Buildpack.URI == "" {
+			return packageConfig, errors.Errorf("missing %s configuration", style.Symbol("buildpack.uri"))
+		}
+		return packageConfig, errors.Errorf("missing %s configuration", style.Symbol("extension.uri"))
 	}
 
 	if packageConfig.Platform.OS == "" {
@@ -100,6 +119,17 @@ func (r *ConfigReader) Read(path string) (Config, error) {
 	}
 
 	return packageConfig, nil
+}
+
+func (r *ConfigReader) ReadBuildpackDescriptor(path string) (dist.BuildpackDescriptor, error) {
+	buildpackCfg := dist.BuildpackDescriptor{}
+
+	_, err := toml.DecodeFile(path, &buildpackCfg)
+	if err != nil {
+		return dist.BuildpackDescriptor{}, err
+	}
+
+	return buildpackCfg, nil
 }
 
 func validateURI(uri, relativeBaseDir string) error {

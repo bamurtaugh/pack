@@ -86,6 +86,70 @@ Detection Order:
  │  │           └ test.bp.one@test.bp.one.version    (optional)[cyclic]
  │  └ test.bp.two@test.bp.two.version                (optional)
  └ test.bp.three@test.bp.three.version
+
+Extensions:
+  ID                   NAME        VERSION                      HOMEPAGE
+  test.bp.one          -           test.bp.one.version          http://geocities.com/cool-bp
+  test.bp.two          -           test.bp.two.version          -
+  test.bp.three        -           test.bp.three.version        -
+
+Detection Order (Extensions):
+ ├ test.top.nested@test.top.nested.version
+ ├ test.bp.one@test.bp.one.version            (optional)
+ ├ test.bp.two@test.bp.two.version            (optional)
+ └ test.bp.three@test.bp.three.version
+`
+		expectedRemoteOutputWithoutExtensions = `
+REMOTE:
+
+Description: Some remote description
+
+Created By:
+  Name: Pack CLI
+  Version: 1.2.3
+
+Trusted: No
+
+Stack:
+  ID: test.stack.id
+
+Lifecycle:
+  Version: 6.7.8
+  Buildpack APIs:
+    Deprecated: (none)
+    Supported: 1.2, 2.3
+  Platform APIs:
+    Deprecated: 0.1, 1.2
+    Supported: 4.5
+
+Run Images:
+  first/local     (user-configured)
+  second/local    (user-configured)
+  some/run-image
+  first/default
+  second/default
+
+Buildpacks:
+  ID                     NAME        VERSION                        HOMEPAGE
+  test.top.nested        -           test.top.nested.version        -
+  test.nested            -                                          http://geocities.com/top-bp
+  test.bp.one            -           test.bp.one.version            http://geocities.com/cool-bp
+  test.bp.two            -           test.bp.two.version            -
+  test.bp.three          -           test.bp.three.version          -
+
+Detection Order:
+ ├ Group #1:
+ │  ├ test.top.nested@test.top.nested.version
+ │  │  └ Group #1:
+ │  │     ├ test.nested
+ │  │     │  └ Group #1:
+ │  │     │     └ test.bp.one@test.bp.one.version      (optional)
+ │  │     ├ test.bp.three@test.bp.three.version        (optional)
+ │  │     └ test.nested.two@test.nested.two.version
+ │  │        └ Group #2:
+ │  │           └ test.bp.one@test.bp.one.version    (optional)[cyclic]
+ │  └ test.bp.two@test.bp.two.version                (optional)
+ └ test.bp.three@test.bp.three.version
 `
 
 		expectedLocalOutput = `
@@ -139,7 +203,73 @@ Detection Order:
  │  │           └ test.bp.one@test.bp.one.version    (optional)[cyclic]
  │  └ test.bp.two@test.bp.two.version                (optional)
  └ test.bp.three@test.bp.three.version
+
+Extensions:
+  ID                   NAME        VERSION                      HOMEPAGE
+  test.bp.one          -           test.bp.one.version          http://geocities.com/cool-bp
+  test.bp.two          -           test.bp.two.version          -
+  test.bp.three        -           test.bp.three.version        -
+
+Detection Order (Extensions):
+ ├ test.top.nested@test.top.nested.version
+ ├ test.bp.one@test.bp.one.version            (optional)
+ ├ test.bp.two@test.bp.two.version            (optional)
+ └ test.bp.three@test.bp.three.version
 `
+
+		expectedLocalOutputWithoutExtensions = `
+LOCAL:
+
+Description: Some local description
+
+Created By:
+  Name: Pack CLI
+  Version: 4.5.6
+
+Trusted: No
+
+Stack:
+  ID: test.stack.id
+
+Lifecycle:
+  Version: 4.5.6
+  Buildpack APIs:
+    Deprecated: 4.5, 6.7
+    Supported: 8.9, 10.11
+  Platform APIs:
+    Deprecated: (none)
+    Supported: 7.8
+
+Run Images:
+  first/local     (user-configured)
+  second/local    (user-configured)
+  some/run-image
+  first/local-default
+  second/local-default
+
+Buildpacks:
+  ID                     NAME        VERSION                        HOMEPAGE
+  test.top.nested        -           test.top.nested.version        -
+  test.nested            -                                          http://geocities.com/top-bp
+  test.bp.one            -           test.bp.one.version            http://geocities.com/cool-bp
+  test.bp.two            -           test.bp.two.version            -
+  test.bp.three          -           test.bp.three.version          -
+
+Detection Order:
+ ├ Group #1:
+ │  ├ test.top.nested@test.top.nested.version
+ │  │  └ Group #1:
+ │  │     ├ test.nested
+ │  │     │  └ Group #1:
+ │  │     │     └ test.bp.one@test.bp.one.version      (optional)
+ │  │     ├ test.bp.three@test.bp.three.version        (optional)
+ │  │     └ test.nested.two@test.nested.two.version
+ │  │        └ Group #2:
+ │  │           └ test.bp.one@test.bp.one.version    (optional)[cyclic]
+ │  └ test.bp.two@test.bp.two.version                (optional)
+ └ test.bp.three@test.bp.three.version
+`
+
 		expectedVerboseStack = `
 Stack:
   ID: test.stack.id
@@ -165,6 +295,10 @@ Buildpacks:
 Detection Order:
   (none)
 `
+		expectedEmptyOrderExt = `
+Detection Order (Extensions):
+  (none)
+`
 		expectedMissingLocalInfo = `
 LOCAL:
 (not present)
@@ -181,11 +315,12 @@ REMOTE:
 				Description:     "Some remote description",
 				Stack:           "test.stack.id",
 				Mixins:          []string{"mixin1", "mixin2", "build:mixin3", "build:mixin4"},
-				RunImage:        "some/run-image",
-				RunImageMirrors: []string{"first/default", "second/default"},
+				RunImages:       []pubbldr.RunImageConfig{{Image: "some/run-image", Mirrors: []string{"first/default", "second/default"}}},
 				Buildpacks:      buildpacks,
 				Order:           order,
-				BuildpackLayers: dist.BuildpackLayers{},
+				Extensions:      extensions,
+				OrderExtensions: orderExtensions,
+				BuildpackLayers: dist.ModuleLayers{},
 				Lifecycle: builder.LifecycleDescriptor{
 					Info: builder.LifecycleInfo{
 						Version: &builder.Version{
@@ -213,11 +348,12 @@ REMOTE:
 				Description:     "Some local description",
 				Stack:           "test.stack.id",
 				Mixins:          []string{"mixin1", "mixin2", "build:mixin3", "build:mixin4"},
-				RunImage:        "some/run-image",
-				RunImageMirrors: []string{"first/local-default", "second/local-default"},
+				RunImages:       []pubbldr.RunImageConfig{{Image: "some/run-image", Mirrors: []string{"first/local-default", "second/local-default"}}},
 				Buildpacks:      buildpacks,
 				Order:           order,
-				BuildpackLayers: dist.BuildpackLayers{},
+				Extensions:      extensions,
+				OrderExtensions: orderExtensions,
+				BuildpackLayers: dist.ModuleLayers{},
 				Lifecycle: builder.LifecycleDescriptor{
 					Info: builder.LifecycleInfo{
 						Version: &builder.Version{
@@ -436,10 +572,8 @@ REMOTE:
 
 		when("no run images are specified", func() {
 			it("displays run images as (none) and warns about unset run image", func() {
-				localInfo.RunImage = ""
-				localInfo.RunImageMirrors = []string{}
-				remoteInfo.RunImage = ""
-				remoteInfo.RunImageMirrors = []string{}
+				localInfo.RunImages = []pubbldr.RunImageConfig{}
+				remoteInfo.RunImages = []pubbldr.RunImageConfig{}
 				emptyLocalRunImages := []config.RunImage{}
 
 				humanReadableWriter := writer.NewHumanReadable()
@@ -456,8 +590,8 @@ REMOTE:
 
 		when("no buildpacks are specified", func() {
 			it("displays buildpacks as (none) and prints warnings", func() {
-				localInfo.Buildpacks = []dist.BuildpackInfo{}
-				remoteInfo.Buildpacks = []dist.BuildpackInfo{}
+				localInfo.Buildpacks = []dist.ModuleInfo{}
+				remoteInfo.Buildpacks = []dist.ModuleInfo{}
 
 				humanReadableWriter := writer.NewHumanReadable()
 
@@ -468,6 +602,23 @@ REMOTE:
 				assert.Contains(outBuf.String(), expectedEmptyBuildpacks)
 				assert.Contains(outBuf.String(), "test-builder has no buildpacks")
 				assert.Contains(outBuf.String(), "Users must supply buildpacks from the host machine")
+			})
+		})
+
+		when("no extensions are specified", func() {
+			it("displays no extensions as (none)", func() {
+				localInfo.Extensions = []dist.ModuleInfo{}
+				remoteInfo.Extensions = []dist.ModuleInfo{}
+
+				humanReadableWriter := writer.NewHumanReadable()
+
+				logger := logging.NewLogWithWriters(&outBuf, &outBuf)
+				err := humanReadableWriter.Print(logger, localRunImages, localInfo, remoteInfo, nil, nil, sharedBuilderInfo)
+				assert.Nil(err)
+
+				assert.Contains(outBuf.String(), "Inspecting builder: 'test-builder'")
+				assert.Contains(outBuf.String(), expectedRemoteOutputWithoutExtensions)
+				assert.Contains(outBuf.String(), expectedLocalOutputWithoutExtensions)
 			})
 		})
 
@@ -491,6 +642,21 @@ REMOTE:
 				assert.Contains(outBuf.String(), expectedEmptyOrder)
 				assert.Contains(outBuf.String(), "test-builder has no buildpacks")
 				assert.Contains(outBuf.String(), "Users must build with explicitly specified buildpacks")
+			})
+		})
+
+		when("no detection order for extension is specified", func() {
+			it("displays detection order for extensions as (none)", func() {
+				localInfo.OrderExtensions = pubbldr.DetectionOrder{}
+				remoteInfo.OrderExtensions = pubbldr.DetectionOrder{}
+
+				humanReadableWriter := writer.NewHumanReadable()
+
+				logger := logging.NewLogWithWriters(&outBuf, &outBuf)
+				err := humanReadableWriter.Print(logger, localRunImages, localInfo, remoteInfo, nil, nil, sharedBuilderInfo)
+				assert.Nil(err)
+
+				assert.Contains(outBuf.String(), expectedEmptyOrderExt)
 			})
 		})
 	})

@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	urlPkg "net/url"
 	"os"
@@ -59,12 +58,15 @@ func NewDialContext(url *urlPkg.URL, config Config) (func(ctx context.Context, n
 		}
 	}()
 
-	dialContext, err := tryGetStdioDialContext(url, sshClient, config.Identity)
-	if err != nil {
-		return nil, err
-	}
-	if dialContext != nil {
-		return dialContext, nil
+	var dialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	if url.Path == "" {
+		dialContext, err = tryGetStdioDialContext(url, sshClient, config.Identity)
+		if err != nil {
+			return nil, err
+		}
+		if dialContext != nil {
+			return dialContext, nil
+		}
 	}
 
 	var addr string
@@ -267,8 +269,8 @@ func NewSSHClientConfig(url *urlPkg.URL, config Config) (*ssh.ClientConfig, erro
 			ssh.KeyAlgoECDSA384,
 			ssh.KeyAlgoECDSA521,
 			ssh.KeyAlgoED25519,
-			ssh.SigAlgoRSASHA2512,
-			ssh.SigAlgoRSASHA2256,
+			ssh.KeyAlgoRSASHA512,
+			ssh.KeyAlgoRSASHA256,
 			ssh.KeyAlgoRSA,
 			ssh.KeyAlgoDSA,
 		},
@@ -347,7 +349,7 @@ func signersToAuthMethods(signers []ssh.Signer) []ssh.AuthMethod {
 // reads key from given path
 // if necessary it will decrypt it
 func loadSignerFromFile(path string, passphrase []byte, passPhraseCallback SecretCallback) (ssh.Signer, error) {
-	key, err := ioutil.ReadFile(path)
+	key, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read key file: %w", err)
 	}

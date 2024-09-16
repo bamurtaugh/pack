@@ -23,27 +23,28 @@ const (
 	testBuilderDescription = "Test Builder Description"
 	testStackID            = "test-builder-stack-id"
 	testRunImage           = "test/run-image"
+	testStackRunImage      = "test/stack-run-image"
 )
 
 var (
-	testTopNestedBuildpack = dist.BuildpackInfo{
+	testTopNestedBuildpack = dist.ModuleInfo{
 		ID:      "test.top.nested",
 		Version: "test.top.nested.version",
 	}
-	testNestedBuildpack = dist.BuildpackInfo{
+	testNestedBuildpack = dist.ModuleInfo{
 		ID:       "test.nested",
 		Version:  "test.nested.version",
 		Homepage: "http://geocities.com/top-bp",
 	}
-	testBuildpack = dist.BuildpackInfo{
+	testBuildpack = dist.ModuleInfo{
 		ID:      "test.bp.two",
 		Version: "test.bp.two.version",
 	}
-	testBuildpackVersionTwo = dist.BuildpackInfo{
+	testBuildpackVersionTwo = dist.ModuleInfo{
 		ID:      "test.bp.two",
 		Version: "test.bp.two.version-2",
 	}
-	testBuildpacks = []dist.BuildpackInfo{
+	testBuildpacks = []dist.ModuleInfo{
 		testBuildpack,
 		testNestedBuildpack,
 		testTopNestedBuildpack,
@@ -75,26 +76,41 @@ var (
 		Stack:       testStack,
 		Lifecycle:   inspectTestLifecycle,
 		CreatedBy:   testCreatorData,
+		RunImages: []builder.RunImageMetadata{
+			{
+				Image:   testRunImage,
+				Mirrors: testRunImageMirrors,
+			},
+		},
 	}
 	testMixins          = []string{"build:mixinA", "mixinX", "mixinY"}
 	expectedTestMixins  = []string{"mixinX", "mixinY", "build:mixinA"}
 	testRunImageMirrors = []string{"test/first-run-image-mirror", "test/second-run-image-mirror"}
 	testStack           = builder.StackMetadata{
 		RunImage: builder.RunImageMetadata{
-			Image:   testRunImage,
+			Image:   testStackRunImage,
 			Mirrors: testRunImageMirrors,
 		},
 	}
 	testOrder = dist.Order{
-		dist.OrderEntry{Group: []dist.BuildpackRef{
-			{BuildpackInfo: testBuildpack, Optional: false},
+		dist.OrderEntry{Group: []dist.ModuleRef{
+			{ModuleInfo: testBuildpack, Optional: false},
 		}},
-		dist.OrderEntry{Group: []dist.BuildpackRef{
-			{BuildpackInfo: testNestedBuildpack, Optional: false},
-			{BuildpackInfo: testTopNestedBuildpack, Optional: true},
+		dist.OrderEntry{Group: []dist.ModuleRef{
+			{ModuleInfo: testNestedBuildpack, Optional: false},
+			{ModuleInfo: testTopNestedBuildpack, Optional: true},
 		}},
 	}
-	testLayers = dist.BuildpackLayers{
+	testOrderExtensions = dist.Order{
+		dist.OrderEntry{Group: []dist.ModuleRef{
+			{ModuleInfo: testBuildpack, Optional: false},
+		}},
+		dist.OrderEntry{Group: []dist.ModuleRef{
+			{ModuleInfo: testNestedBuildpack, Optional: false},
+			{ModuleInfo: testTopNestedBuildpack, Optional: true},
+		}},
+	}
+	testLayers = dist.ModuleLayers{
 		"test.top.nested": {
 			"test.top.nested.version": {
 				API:         api.MustParse("0.2"),
@@ -125,18 +141,18 @@ var (
 	}
 	expectedDetectionTestOrder = pubbldr.DetectionOrder{
 		{
-			BuildpackRef: dist.BuildpackRef{
-				BuildpackInfo: testBuildpack,
+			ModuleRef: dist.ModuleRef{
+				ModuleInfo: testBuildpack,
 			},
 		},
 		{
-			BuildpackRef: dist.BuildpackRef{
-				BuildpackInfo: testTopNestedBuildpack,
+			ModuleRef: dist.ModuleRef{
+				ModuleInfo: testTopNestedBuildpack,
 			},
 			GroupDetectionOrder: pubbldr.DetectionOrder{
 				{
-					BuildpackRef: dist.BuildpackRef{
-						BuildpackInfo: testNestedBuildpack,
+					ModuleRef: dist.ModuleRef{
+						ModuleInfo: testNestedBuildpack,
 					},
 				},
 			},
@@ -209,8 +225,11 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 			assert.Equal(info.Description, testBuilderDescription)
 			assert.Equal(info.StackID, testStackID)
 			assert.Equal(info.Mixins, expectedTestMixins)
-			assert.Equal(info.RunImage, testRunImage)
-			assert.Equal(info.RunImageMirrors, testRunImageMirrors)
+			assert.Equal(len(info.RunImages), 2)
+			assert.Equal(info.RunImages[0].Image, testRunImage)
+			assert.Equal(info.RunImages[1].Image, testStackRunImage)
+			assert.Equal(info.RunImages[0].Mirrors, testRunImageMirrors)
+			assert.Equal(info.RunImages[1].Mirrors, testRunImageMirrors)
 			assert.Equal(info.Buildpacks, testBuildpacks)
 			assert.Equal(info.Order, expectedDetectionTestOrder)
 			assert.Equal(info.BuildpackLayers, testLayers)
@@ -221,7 +240,7 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 		it("sorts buildPacks by ID then Version", func() {
 			metadata := builder.Metadata{
 				Description: testBuilderDescription,
-				Buildpacks: []dist.BuildpackInfo{
+				Buildpacks: []dist.ModuleInfo{
 					testNestedBuildpack,
 					testBuildpackVersionTwo,
 					testBuildpack,
@@ -238,14 +257,14 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 			info, err := inspector.Inspect(testBuilderName, true, pubbldr.OrderDetectionNone)
 
 			assert.Nil(err)
-			assert.Equal(info.Buildpacks, []dist.BuildpackInfo{testBuildpack, testBuildpackVersionTwo, testNestedBuildpack})
+			assert.Equal(info.Buildpacks, []dist.ModuleInfo{testBuildpack, testBuildpackVersionTwo, testNestedBuildpack})
 		})
 
 		when("there are duplicated buildpacks in metadata", func() {
 			it("returns deduplicated buildpacks", func() {
 				metadata := builder.Metadata{
 					Description: testBuilderDescription,
-					Buildpacks: []dist.BuildpackInfo{
+					Buildpacks: []dist.ModuleInfo{
 						testTopNestedBuildpack,
 						testNestedBuildpack,
 						testTopNestedBuildpack,
@@ -261,7 +280,7 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 				info, err := inspector.Inspect(testBuilderName, true, pubbldr.OrderDetectionNone)
 
 				assert.Nil(err)
-				assert.Equal(info.Buildpacks, []dist.BuildpackInfo{testNestedBuildpack, testTopNestedBuildpack})
+				assert.Equal(info.Buildpacks, []dist.ModuleInfo{testNestedBuildpack, testTopNestedBuildpack})
 			})
 		})
 
@@ -282,7 +301,7 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 			})
 		})
 
-		when("label manager returns an error for `StackID`", func() {
+		when("label manager does not return an error for `StackID`", func() {
 			it("returns the wrapped error", func() {
 				expectedBaseError := errors.New("label not found")
 
@@ -295,7 +314,7 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 				)
 				_, err := inspector.Inspect(testBuilderName, true, pubbldr.OrderDetectionNone)
 
-				assert.ErrorWithMessage(err, "reading image stack id: label not found")
+				assert.Nil(err)
 			})
 		})
 
@@ -333,7 +352,24 @@ func testInspect(t *testing.T, when spec.G, it spec.S) {
 			})
 		})
 
-		when("label manager returns an error for `BuildpackLayers`", func() {
+		when("label manager returns an error for `OrderExtensions`", func() {
+			it("returns the wrapped error", func() {
+				expectedBaseError := errors.New("label not found")
+
+				labelManager := newLabelManager(errorForOrderExtensions(expectedBaseError))
+
+				inspector := builder.NewInspector(
+					newDefaultInspectableFetcher(),
+					newLabelManagerFactory(labelManager),
+					newDefaultDetectionCalculator(),
+				)
+				_, err := inspector.Inspect(testBuilderName, true, pubbldr.OrderDetectionNone)
+
+				assert.ErrorWithMessage(err, "reading image order extensions: label not found")
+			})
+		})
+
+		when("label manager returns an error for `ModuleLayers`", func() {
 			it("returns the wrapped error", func() {
 				expectedBaseError := errors.New("label not found")
 
@@ -392,6 +428,7 @@ func newDefaultLabelManager() *fakes.FakeLabelManager {
 		ReturnForMixins:          testMixins,
 		ReturnForOrder:           testOrder,
 		ReturnForBuildpackLayers: testLayers,
+		ReturnForOrderExtensions: testOrderExtensions,
 	}
 }
 
@@ -424,6 +461,12 @@ func errorForMixins(err error) labelManagerModifier {
 func errorForOrder(err error) labelManagerModifier {
 	return func(manager *fakes.FakeLabelManager) {
 		manager.ErrorForOrder = err
+	}
+}
+
+func errorForOrderExtensions(err error) labelManagerModifier {
+	return func(manager *fakes.FakeLabelManager) {
+		manager.ErrorForOrderExtensions = err
 	}
 }
 

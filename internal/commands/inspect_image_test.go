@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/buildpacks/lifecycle/platform"
+	"github.com/buildpacks/lifecycle/platform/files"
 	"github.com/golang/mock/gomock"
 	"github.com/heroku/color"
 	"github.com/sclevine/spec"
@@ -32,18 +32,38 @@ var (
 	expectedLocalImageInfo = &client.ImageInfo{
 		StackID:    "local.image.stack",
 		Buildpacks: nil,
-		Base:       platform.RunImageMetadata{},
+		Base:       files.RunImageForRebase{},
 		BOM:        nil,
-		Stack:      platform.StackMetadata{},
+		Stack:      files.Stack{},
 		Processes:  client.ProcessDetails{},
 	}
 
 	expectedRemoteImageInfo = &client.ImageInfo{
 		StackID:    "remote.image.stack",
 		Buildpacks: nil,
-		Base:       platform.RunImageMetadata{},
+		Base:       files.RunImageForRebase{},
 		BOM:        nil,
-		Stack:      platform.StackMetadata{},
+		Stack:      files.Stack{},
+		Processes:  client.ProcessDetails{},
+	}
+
+	expectedLocalImageWithExtensionInfo = &client.ImageInfo{
+		StackID:    "local.image.stack",
+		Buildpacks: nil,
+		Extensions: nil,
+		Base:       files.RunImageForRebase{},
+		BOM:        nil,
+		Stack:      files.Stack{},
+		Processes:  client.ProcessDetails{},
+	}
+
+	expectedRemoteImageWithExtensionInfo = &client.ImageInfo{
+		StackID:    "remote.image.stack",
+		Buildpacks: nil,
+		Extensions: nil,
+		Base:       files.RunImageForRebase{},
+		BOM:        nil,
+		Stack:      files.Stack{},
 		Processes:  client.ProcessDetails{},
 	}
 )
@@ -83,7 +103,6 @@ func testInspectImageCommand(t *testing.T, when spec.G, it spec.S) {
 
 			mockClient.EXPECT().InspectImage("some/image", true).Return(expectedLocalImageInfo, nil)
 			mockClient.EXPECT().InspectImage("some/image", false).Return(expectedRemoteImageInfo, nil)
-
 			command := commands.InspectImage(logger, inspectImageWriterFactory, cfg, mockClient)
 			command.SetArgs([]string{"some/image"})
 			err := command.Execute()
@@ -91,6 +110,28 @@ func testInspectImageCommand(t *testing.T, when spec.G, it spec.S) {
 
 			assert.Equal(inspectImageWriter.ReceivedInfoForLocal, expectedLocalImageInfo)
 			assert.Equal(inspectImageWriter.ReceivedInfoForRemote, expectedRemoteImageInfo)
+			assert.Equal(inspectImageWriter.RecievedGeneralInfo, expectedSharedInfo)
+			assert.Equal(inspectImageWriter.ReceivedErrorForLocal, nil)
+			assert.Equal(inspectImageWriter.ReceivedErrorForRemote, nil)
+			assert.Equal(inspectImageWriterFactory.ReceivedForKind, "human-readable")
+
+			assert.ContainsF(outBuf.String(), "LOCAL:\n%s", expectedLocalImageDisplay)
+			assert.ContainsF(outBuf.String(), "REMOTE:\n%s", expectedRemoteImageDisplay)
+		})
+
+		it("passes output of local and remote builders to correct writer for extension", func() {
+			inspectImageWriter := newDefaultInspectImageWriter()
+			inspectImageWriterFactory := newImageWriterFactory(inspectImageWriter)
+
+			mockClient.EXPECT().InspectImage("some/image", true).Return(expectedLocalImageWithExtensionInfo, nil)
+			mockClient.EXPECT().InspectImage("some/image", false).Return(expectedRemoteImageWithExtensionInfo, nil)
+			command := commands.InspectImage(logger, inspectImageWriterFactory, cfg, mockClient)
+			command.SetArgs([]string{"some/image"})
+			err := command.Execute()
+			assert.Nil(err)
+
+			assert.Equal(inspectImageWriter.ReceivedInfoForLocal, expectedLocalImageWithExtensionInfo)
+			assert.Equal(inspectImageWriter.ReceivedInfoForRemote, expectedRemoteImageWithExtensionInfo)
 			assert.Equal(inspectImageWriter.RecievedGeneralInfo, expectedSharedInfo)
 			assert.Equal(inspectImageWriter.ReceivedErrorForLocal, nil)
 			assert.Equal(inspectImageWriter.ReceivedErrorForRemote, nil)
@@ -120,6 +161,35 @@ func testInspectImageCommand(t *testing.T, when spec.G, it spec.S) {
 
 			mockClient.EXPECT().InspectImage("some/image", true).Return(expectedLocalImageInfo, nil)
 			mockClient.EXPECT().InspectImage("some/image", false).Return(expectedRemoteImageInfo, nil)
+
+			command := commands.InspectImage(logger, inspectImageWriterFactory, cfg, mockClient)
+			command.SetArgs([]string{"some/image"})
+			err := command.Execute()
+			assert.Nil(err)
+
+			assert.Equal(inspectImageWriter.RecievedGeneralInfo.RunImageMirrors, cfg.RunImages)
+		})
+
+		it("passes configured run image mirrors to the writer", func() {
+			cfg = config.Config{
+				RunImages: []config.RunImage{{
+					Image:   "image-name",
+					Mirrors: []string{"first-mirror", "second-mirror2"},
+				},
+					{
+						Image:   "image-name2",
+						Mirrors: []string{"other-mirror"},
+					},
+				},
+				TrustedBuilders: nil,
+				Registries:      nil,
+			}
+
+			inspectImageWriter := newDefaultInspectImageWriter()
+			inspectImageWriterFactory := newImageWriterFactory(inspectImageWriter)
+
+			mockClient.EXPECT().InspectImage("some/image", true).Return(expectedLocalImageWithExtensionInfo, nil)
+			mockClient.EXPECT().InspectImage("some/image", false).Return(expectedRemoteImageWithExtensionInfo, nil)
 
 			command := commands.InspectImage(logger, inspectImageWriterFactory, cfg, mockClient)
 			command.SetArgs([]string{"some/image"})
@@ -176,6 +246,24 @@ func testInspectImageCommand(t *testing.T, when spec.G, it spec.S) {
 
 					mockClient.EXPECT().InspectImage("some/image", true).Return(expectedLocalImageInfo, nil)
 					mockClient.EXPECT().InspectImage("some/image", false).Return(expectedRemoteImageInfo, nil)
+
+					command := commands.InspectImage(logger, inspectImageWriterFactory, cfg, mockClient)
+					command.SetArgs([]string{"some/image"})
+					err := command.Execute()
+					assert.ErrorWithMessage(err, "unable to print")
+				})
+			})
+
+			when("Print returns fails for extension", func() {
+				it("returns the error", func() {
+					printError := errors.New("unable to print")
+					inspectImageWriter := &fakes.FakeInspectImageWriter{
+						ErrorForPrint: printError,
+					}
+					inspectImageWriterFactory := newImageWriterFactory(inspectImageWriter)
+
+					mockClient.EXPECT().InspectImage("some/image", true).Return(expectedLocalImageWithExtensionInfo, nil)
+					mockClient.EXPECT().InspectImage("some/image", false).Return(expectedRemoteImageWithExtensionInfo, nil)
 
 					command := commands.InspectImage(logger, inspectImageWriterFactory, cfg, mockClient)
 					command.SetArgs([]string{"some/image"})

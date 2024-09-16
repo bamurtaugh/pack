@@ -1,24 +1,42 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"github.com/buildpacks/imgutil"
 	"github.com/google/go-containerregistry/pkg/name"
 
 	"github.com/buildpacks/pack/internal/builder"
 	"github.com/buildpacks/pack/internal/config"
 	"github.com/buildpacks/pack/internal/registry"
 	"github.com/buildpacks/pack/internal/style"
+	"github.com/buildpacks/pack/pkg/image"
 	"github.com/buildpacks/pack/pkg/logging"
 )
+
+func (c *Client) addManifestToIndex(ctx context.Context, repoName string, index imgutil.ImageIndex) error {
+	imageRef, err := name.ParseReference(repoName, name.WeakValidation)
+	if err != nil {
+		return fmt.Errorf("'%s' is not a valid manifest reference: %s", style.Symbol(repoName), err)
+	}
+
+	imageToAdd, err := c.imageFetcher.Fetch(ctx, imageRef.Name(), image.FetchOptions{Daemon: false})
+	if err != nil {
+		return err
+	}
+
+	index.AddManifest(imageToAdd.UnderlyingImage())
+	return nil
+}
 
 func (c *Client) parseTagReference(imageName string) (name.Reference, error) {
 	if imageName == "" {
 		return nil, errors.New("image is a required parameter")
 	}
 	if _, err := name.ParseReference(imageName, name.WeakValidation); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("'%s' is not a valid tag reference: %s", imageName, err)
 	}
 	ref, err := name.NewTag(imageName, name.WeakValidation)
 	if err != nil {
@@ -28,7 +46,7 @@ func (c *Client) parseTagReference(imageName string) (name.Reference, error) {
 	return ref, nil
 }
 
-func (c *Client) resolveRunImage(runImage, imgRegistry, bldrRegistry string, stackInfo builder.StackMetadata, additionalMirrors map[string][]string, publish bool) string {
+func (c *Client) resolveRunImage(runImage, imgRegistry, bldrRegistry string, runImageMetadata builder.RunImageMetadata, additionalMirrors map[string][]string, publish bool, options image.FetchOptions) string {
 	if runImage != "" {
 		c.logger.Debugf("Using provided run-image %s", style.Symbol(runImage))
 		return runImage
@@ -41,15 +59,17 @@ func (c *Client) resolveRunImage(runImage, imgRegistry, bldrRegistry string, sta
 
 	runImageName := getBestRunMirror(
 		preferredRegistry,
-		stackInfo.RunImage.Image,
-		stackInfo.RunImage.Mirrors,
-		additionalMirrors[stackInfo.RunImage.Image],
+		runImageMetadata.Image,
+		runImageMetadata.Mirrors,
+		additionalMirrors[runImageMetadata.Image],
+		c.imageFetcher,
+		options,
 	)
 
 	switch {
-	case runImageName == stackInfo.RunImage.Image:
+	case runImageName == runImageMetadata.Image:
 		c.logger.Debugf("Selected run image %s", style.Symbol(runImageName))
-	case contains(stackInfo.RunImage.Mirrors, runImageName):
+	case contains(runImageMetadata.Mirrors, runImageName):
 		c.logger.Debugf("Selected run image mirror %s", style.Symbol(runImageName))
 	default:
 		c.logger.Debugf("Selected run image mirror %s from local config", style.Symbol(runImageName))
@@ -107,25 +127,33 @@ func contains(slc []string, v string) bool {
 	return false
 }
 
-func getBestRunMirror(registry string, runImage string, mirrors []string, preferredMirrors []string) string {
-	var runImageList []string
-	runImageList = append(runImageList, preferredMirrors...)
-	runImageList = append(runImageList, runImage)
-	runImageList = append(runImageList, mirrors...)
-
+func getBestRunMirror(registry string, runImage string, mirrors []string, preferredMirrors []string, fetcher ImageFetcher, options image.FetchOptions) string {
+	runImageList := filterImageList(append(append(append([]string{}, preferredMirrors...), runImage), mirrors...), fetcher, options)
 	for _, img := range runImageList {
 		ref, err := name.ParseReference(img, name.WeakValidation)
 		if err != nil {
 			continue
 		}
-		if ref.Context().RegistryStr() == registry {
+		if reg := ref.Context().RegistryStr(); reg == registry {
 			return img
 		}
 	}
 
-	if len(preferredMirrors) > 0 {
-		return preferredMirrors[0]
+	if len(runImageList) > 0 {
+		return runImageList[0]
 	}
 
 	return runImage
+}
+
+func filterImageList(imageList []string, fetcher ImageFetcher, options image.FetchOptions) []string {
+	var accessibleImages []string
+
+	for i, img := range imageList {
+		if fetcher.CheckReadAccess(img, options) {
+			accessibleImages = append(accessibleImages, imageList[i])
+		}
+	}
+
+	return accessibleImages
 }

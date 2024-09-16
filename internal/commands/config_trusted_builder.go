@@ -18,7 +18,7 @@ func ConfigTrustedBuilder(logger logging.Logger, cfg config.Config, cfgPath stri
 		Short: "List, add and remove trusted builders",
 		Long: "When pack considers a builder to be trusted, `pack build` operations will use a single lifecycle binary " +
 			"called the creator. This is more efficient than using an untrusted builder, where pack will execute " +
-			"five separate lifecycle binaries: detect, analyze, restore, build and export.\n\n" +
+			"five separate lifecycle binaries, each in its own container: analyze, detect, restore, build and export.\n\n" +
 			"For more on trusted builders, and when to trust or untrust a builder, " +
 			"check out our docs here: https://buildpacks.io/docs/tools/pack/concepts/trusted_builders/",
 		Aliases: []string{"trusted-builder", "trust-builder", "trust-builders"},
@@ -80,9 +80,9 @@ func removeTrustedBuilder(args []string, logger logging.Logger, cfg config.Confi
 
 	// Builder is not in the trusted builder list
 	if len(existingTrustedBuilders) == len(cfg.TrustedBuilders) {
-		if isSuggestedBuilder(builder) {
-			// Attempted to untrust a suggested builder
-			return errors.Errorf("Builder %s is a suggested builder, and is trusted by default. Currently pack doesn't support making these builders untrusted", style.Symbol(builder))
+		if bldr.IsKnownTrustedBuilder(builder) {
+			// Attempted to untrust a known trusted builder
+			return errors.Errorf("Builder %s is a known trusted builder. Currently pack doesn't support making these builders untrusted", style.Symbol(builder))
 		}
 
 		logger.Infof("Builder %s wasn't trusted", style.Symbol(builder))
@@ -98,12 +98,12 @@ func removeTrustedBuilder(args []string, logger logging.Logger, cfg config.Confi
 	return nil
 }
 
-func listTrustedBuilders(args []string, logger logging.Logger, cfg config.Config) {
-	logger.Info("Trusted Builders:")
-
+func getTrustedBuilders(cfg config.Config) []string {
 	var trustedBuilders []string
-	for _, builder := range bldr.SuggestedBuilders {
-		trustedBuilders = append(trustedBuilders, builder.Image)
+	for _, knownBuilder := range bldr.KnownBuilders {
+		if knownBuilder.Trusted {
+			trustedBuilders = append(trustedBuilders, knownBuilder.Image)
+		}
 	}
 
 	for _, builder := range cfg.TrustedBuilders {
@@ -111,7 +111,13 @@ func listTrustedBuilders(args []string, logger logging.Logger, cfg config.Config
 	}
 
 	sort.Strings(trustedBuilders)
+	return trustedBuilders
+}
 
+func listTrustedBuilders(args []string, logger logging.Logger, cfg config.Config) {
+	logger.Info("Trusted Builders:")
+
+	trustedBuilders := getTrustedBuilders(cfg)
 	for _, builder := range trustedBuilders {
 		logger.Infof("  %s", builder)
 	}

@@ -2,7 +2,6 @@ package commands_test
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -37,7 +36,7 @@ func testListTrustedBuildersCommand(t *testing.T, when spec.G, it spec.S) {
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
 		command = commands.ListTrustedBuilders(logger, config.Config{})
 
-		tempPackHome, err = ioutil.TempDir("", "pack-home")
+		tempPackHome, err = os.MkdirTemp("", "pack-home")
 		h.AssertNil(t, err)
 		h.AssertNil(t, os.Setenv("PACK_HOME", tempPackHome))
 	})
@@ -65,11 +64,13 @@ func testListTrustedBuildersCommand(t *testing.T, when spec.G, it spec.S) {
 			h.AssertNotContains(t, outBuf.String(), builderName)
 			h.AssertContainsAllInOrder(t,
 				outBuf,
-				"gcr.io/buildpacks/builder:v1",
-				"heroku/buildpacks:20",
-				"paketobuildpacks/builder:base",
-				"paketobuildpacks/builder:full",
-				"paketobuildpacks/builder:tiny",
+				"gcr.io/buildpacks/builder:google-22",
+				"heroku/builder:20",
+				"heroku/builder:22",
+				"heroku/builder:24",
+				"paketobuildpacks/builder-jammy-base",
+				"paketobuildpacks/builder-jammy-full",
+				"paketobuildpacks/builder-jammy-tiny",
 			)
 
 			listTrustedBuildersCommand := commands.ListTrustedBuilders(
@@ -85,12 +86,14 @@ func testListTrustedBuildersCommand(t *testing.T, when spec.G, it spec.S) {
 
 			h.AssertContainsAllInOrder(t,
 				outBuf,
-				"gcr.io/buildpacks/builder:v1",
+				"gcr.io/buildpacks/builder:google-22",
 				builderName,
-				"heroku/buildpacks:20",
-				"paketobuildpacks/builder:base",
-				"paketobuildpacks/builder:full",
-				"paketobuildpacks/builder:tiny",
+				"heroku/builder:20",
+				"heroku/builder:22",
+				"heroku/builder:24",
+				"paketobuildpacks/builder-jammy-base",
+				"paketobuildpacks/builder-jammy-full",
+				"paketobuildpacks/builder-jammy-tiny",
 			)
 		})
 	})

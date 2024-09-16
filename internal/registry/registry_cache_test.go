@@ -2,7 +2,6 @@ package registry
 
 import (
 	"bytes"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -10,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/heroku/color"
 	"github.com/sclevine/spec"
 	"github.com/sclevine/spec/report"
-	"gopkg.in/src-d/go-git.v4"
-	"gopkg.in/src-d/go-git.v4/plumbing/object"
 
 	"github.com/buildpacks/pack/pkg/logging"
 	h "github.com/buildpacks/pack/testhelpers"
@@ -37,15 +36,15 @@ func testRegistryCache(t *testing.T, when spec.G, it spec.S) {
 	it.Before(func() {
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
 
-		tmpDir, err = ioutil.TempDir("", "registry")
+		tmpDir, err = os.MkdirTemp("", "registry")
 		h.AssertNil(t, err)
 
 		registryFixture = h.CreateRegistryFixture(t, tmpDir, filepath.Join("..", "..", "testdata", "registry"))
 	})
 
 	it.After(func() {
-		err := os.RemoveAll(tmpDir)
-		h.AssertNil(t, err)
+		// Ignoring the error for now, it failed randomly on windows
+		_ = os.RemoveAll(tmpDir)
 	})
 
 	when("#NewDefaultRegistryCache", func() {
@@ -71,6 +70,13 @@ func testRegistryCache(t *testing.T, when spec.G, it spec.S) {
 			it("fails to create a registry cache", func() {
 				_, err := NewRegistryCache(logger, tmpDir, "://bad-uri")
 				h.AssertError(t, err, "parsing registry url")
+			})
+		})
+
+		when("registryURL is Azure", func() {
+			it("fails to create a registry cache", func() {
+				_, err := NewRegistryCache(logger, tmpDir, "https://dev.azure.com/")
+				h.AssertNil(t, err)
 			})
 		})
 

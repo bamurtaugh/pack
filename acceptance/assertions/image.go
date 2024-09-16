@@ -6,6 +6,7 @@ package assertions
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/buildpacks/pack/acceptance/managers"
 	h "github.com/buildpacks/pack/testhelpers"
@@ -50,13 +51,38 @@ func (a ImageAssertionManager) HasBaseImage(image, base string) {
 	}
 }
 
-func (a ImageAssertionManager) HasLabelWithData(image, label, data string) {
+func (a ImageAssertionManager) HasCreateTime(image string, expectedTime time.Time) {
+	a.testObject.Helper()
+	inspect, err := a.imageManager.InspectLocal(image)
+	a.assert.Nil(err)
+	actualTime, err := time.Parse("2006-01-02T15:04:05Z", inspect.Created)
+	a.assert.Nil(err)
+	a.assert.TrueWithMessage(actualTime.Sub(expectedTime) < 5*time.Second && expectedTime.Sub(actualTime) < 5*time.Second, fmt.Sprintf("expected image create time %s to match expected time %s", actualTime, expectedTime))
+}
+
+func (a ImageAssertionManager) HasLabelContaining(image, label, data string) {
 	a.testObject.Helper()
 	inspect, err := a.imageManager.InspectLocal(image)
 	a.assert.Nil(err)
 	label, ok := inspect.Config.Labels[label]
 	a.assert.TrueWithMessage(ok, fmt.Sprintf("expected label %s to exist", label))
 	a.assert.Contains(label, data)
+}
+
+func (a ImageAssertionManager) HasLabelNotContaining(image, label, data string) {
+	a.testObject.Helper()
+	inspect, err := a.imageManager.InspectLocal(image)
+	a.assert.Nil(err)
+	label, ok := inspect.Config.Labels[label]
+	a.assert.TrueWithMessage(ok, fmt.Sprintf("expected label %s to exist", label))
+	a.assert.NotContains(label, data)
+}
+
+func (a ImageAssertionManager) HasLengthLayers(image string, length int) {
+	a.testObject.Helper()
+	inspect, err := a.imageManager.InspectLocal(image)
+	a.assert.Nil(err)
+	a.assert.TrueWithMessage(len(inspect.RootFS.Layers) == length, fmt.Sprintf("expected image to have %d layers, found %d", length, len(inspect.RootFS.Layers)))
 }
 
 func (a ImageAssertionManager) RunsWithOutput(image string, expectedOutputs ...string) {

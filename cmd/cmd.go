@@ -23,8 +23,9 @@ type ConfigurableLogger interface {
 	WantVerbose(f bool)
 }
 
-//nolint:staticcheck
 // NewPackCommand generates a Pack command
+//
+//nolint:staticcheck
 func NewPackCommand(logger ConfigurableLogger) (*cobra.Command, error) {
 	cobra.EnableCommandSorting = false
 	cfg, cfgPath, err := initConfig()
@@ -42,15 +43,16 @@ func NewPackCommand(logger ConfigurableLogger) (*cobra.Command, error) {
 		Short: "CLI for building apps using Cloud Native Buildpacks",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if fs := cmd.Flags(); fs != nil {
-				if flag, err := fs.GetBool("no-color"); err == nil && flag {
-					color.Disable(flag)
-				}
+				if forceColor, err := fs.GetBool("force-color"); err == nil && !forceColor {
+					if flag, err := fs.GetBool("no-color"); err == nil && flag {
+						color.Disable(flag)
+					}
 
-				_, canDisplayColor := term.IsTerminal(logging.GetWriterForLevel(logger, logging.InfoLevel))
-				if !canDisplayColor {
-					color.Disable(true)
+					_, canDisplayColor := term.IsTerminal(logging.GetWriterForLevel(logger, logging.InfoLevel))
+					if !canDisplayColor {
+						color.Disable(true)
+					}
 				}
-
 				if flag, err := fs.GetBool("quiet"); err == nil {
 					logger.WantQuiet(flag)
 				}
@@ -65,6 +67,7 @@ func NewPackCommand(logger ConfigurableLogger) (*cobra.Command, error) {
 	}
 
 	rootCmd.PersistentFlags().Bool("no-color", false, "Disable color output")
+	rootCmd.PersistentFlags().Bool("force-color", false, "Force color output")
 	rootCmd.PersistentFlags().Bool("timestamps", false, "Enable timestamps in output")
 	rootCmd.PersistentFlags().BoolP("quiet", "q", false, "Show less output")
 	rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Show more output")
@@ -75,6 +78,7 @@ func NewPackCommand(logger ConfigurableLogger) (*cobra.Command, error) {
 	rootCmd.AddCommand(commands.Build(logger, cfg, packClient))
 	rootCmd.AddCommand(commands.NewBuilderCommand(logger, cfg, packClient))
 	rootCmd.AddCommand(commands.NewBuildpackCommand(logger, cfg, packClient, buildpackage.NewConfigReader()))
+	rootCmd.AddCommand(commands.NewExtensionCommand(logger, cfg, packClient, buildpackage.NewConfigReader()))
 	rootCmd.AddCommand(commands.NewConfigCommand(logger, cfg, cfgPath, packClient))
 	rootCmd.AddCommand(commands.InspectImage(logger, imagewriter.NewFactory(), cfg, packClient))
 	rootCmd.AddCommand(commands.NewStackCommand(logger))
@@ -92,7 +96,6 @@ func NewPackCommand(logger ConfigurableLogger) (*cobra.Command, error) {
 	rootCmd.AddCommand(commands.ListTrustedBuilders(logger, cfg))
 	rootCmd.AddCommand(commands.CreateBuilder(logger, cfg, packClient))
 	rootCmd.AddCommand(commands.PackageBuildpack(logger, cfg, packClient, buildpackage.NewConfigReader()))
-	rootCmd.AddCommand(commands.SuggestStacks(logger))
 
 	if cfg.Experimental {
 		rootCmd.AddCommand(commands.AddBuildpackRegistry(logger, cfg, cfgPath))
@@ -101,6 +104,7 @@ func NewPackCommand(logger ConfigurableLogger) (*cobra.Command, error) {
 		rootCmd.AddCommand(commands.SetDefaultRegistry(logger, cfg, cfgPath))
 		rootCmd.AddCommand(commands.RemoveRegistry(logger, cfg, cfgPath))
 		rootCmd.AddCommand(commands.YankBuildpack(logger, cfg, packClient))
+		rootCmd.AddCommand(commands.NewManifestCommand(logger, packClient))
 	}
 
 	packHome, err := config.PackHome()
@@ -134,6 +138,10 @@ func initConfig() (config.Config, string, error) {
 }
 
 func initClient(logger logging.Logger, cfg config.Config) (*client.Client, error) {
+	if err := client.ProcessDockerContext(logger); err != nil {
+		return nil, err
+	}
+
 	dc, err := tryInitSSHDockerClient()
 	if err != nil {
 		return nil, err

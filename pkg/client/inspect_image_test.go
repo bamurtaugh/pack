@@ -9,8 +9,10 @@ import (
 
 	"github.com/buildpacks/imgutil/fakes"
 	"github.com/buildpacks/lifecycle/launch"
-	"github.com/buildpacks/lifecycle/platform"
+	"github.com/buildpacks/lifecycle/platform/files"
 	"github.com/golang/mock/gomock"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/heroku/color"
 	"github.com/sclevine/spec"
 	"github.com/sclevine/spec/report"
@@ -27,14 +29,23 @@ func TestInspectImage(t *testing.T) {
 	spec.Run(t, "InspectImage", testInspectImage, spec.Parallel(), spec.Report(report.Terminal{}))
 }
 
+// PlatformAPI should be ignored because it is not set in the metadata label
+var ignorePlatformAPI = []cmp.Option{
+	cmpopts.IgnoreFields(launch.Process{}, "PlatformAPI"),
+	cmpopts.IgnoreFields(launch.RawCommand{}, "PlatformAPI"),
+}
+
 func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 	var (
-		subject          *Client
-		mockImageFetcher *testmocks.MockImageFetcher
-		mockDockerClient *testmocks.MockCommonAPIClient
-		mockController   *gomock.Controller
-		mockImage        *testmocks.MockImage
-		out              bytes.Buffer
+		subject                        *Client
+		mockImageFetcher               *testmocks.MockImageFetcher
+		mockDockerClient               *testmocks.MockCommonAPIClient
+		mockController                 *gomock.Controller
+		mockImage                      *testmocks.MockImage
+		mockImageNoRebasable           *testmocks.MockImage
+		mockImageRebasableWithoutLabel *testmocks.MockImage
+		mockImageWithExtension         *testmocks.MockImage
+		out                            bytes.Buffer
 	)
 
 	it.Before(func() {
@@ -47,7 +58,9 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 		h.AssertNil(t, err)
 
 		mockImage = testmocks.NewImage("some/image", "", nil)
+		h.AssertNil(t, mockImage.SetWorkingDir("/test-workdir"))
 		h.AssertNil(t, mockImage.SetLabel("io.buildpacks.stack.id", "test.stack.id"))
+		h.AssertNil(t, mockImage.SetLabel("io.buildpacks.rebasable", "true"))
 		h.AssertNil(t, mockImage.SetLabel(
 			"io.buildpacks.lifecycle.metadata",
 			`{
@@ -103,6 +116,195 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
   }
 }`,
 		))
+
+		mockImageNoRebasable = testmocks.NewImage("some/imageNoRebasable", "", nil)
+		h.AssertNil(t, mockImageNoRebasable.SetWorkingDir("/test-workdir"))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel("io.buildpacks.stack.id", "test.stack.id"))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel("io.buildpacks.rebasable", "false"))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel(
+			"io.buildpacks.lifecycle.metadata",
+			`{
+  "stack": {
+    "runImage": {
+      "image": "some-run-image-no-rebasable",
+      "mirrors": [
+        "some-mirror",
+        "other-mirror"
+      ]
+    }
+  },
+  "runImage": {
+    "topLayer": "some-top-layer",
+    "reference": "some-run-image-reference"
+  }
+}`,
+		))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel(
+			"io.buildpacks.build.metadata",
+			`{
+  "bom": [
+    {
+      "name": "some-bom-element"
+    }
+  ],
+  "buildpacks": [
+    {
+      "id": "some-buildpack",
+      "version": "some-version"
+    },
+    {
+      "id": "other-buildpack",
+      "version": "other-version"
+    }
+  ],
+  "processes": [
+    {
+      "type": "other-process",
+      "command": "/other/process",
+      "args": ["opt", "1"],
+      "direct": true
+    },
+    {
+      "type": "web",
+      "command": "/start/web-process",
+      "args": ["-p", "1234"],
+      "direct": false
+    }
+  ],
+  "launcher": {
+    "version": "0.5.0"
+  }
+}`,
+		))
+
+		mockImageRebasableWithoutLabel = testmocks.NewImage("some/imageRebasableWithoutLabel", "", nil)
+		h.AssertNil(t, mockImageNoRebasable.SetWorkingDir("/test-workdir"))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel("io.buildpacks.stack.id", "test.stack.id"))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel(
+			"io.buildpacks.lifecycle.metadata",
+			`{
+  "stack": {
+    "runImage": {
+      "image": "some-run-image-no-rebasable",
+      "mirrors": [
+        "some-mirror",
+        "other-mirror"
+      ]
+    }
+  },
+  "runImage": {
+    "topLayer": "some-top-layer",
+    "reference": "some-run-image-reference"
+  }
+}`,
+		))
+		h.AssertNil(t, mockImageNoRebasable.SetLabel(
+			"io.buildpacks.build.metadata",
+			`{
+  "bom": [
+    {
+      "name": "some-bom-element"
+    }
+  ],
+  "buildpacks": [
+    {
+      "id": "some-buildpack",
+      "version": "some-version"
+    },
+    {
+      "id": "other-buildpack",
+      "version": "other-version"
+    }
+  ],
+  "processes": [
+    {
+      "type": "other-process",
+      "command": "/other/process",
+      "args": ["opt", "1"],
+      "direct": true
+    },
+    {
+      "type": "web",
+      "command": "/start/web-process",
+      "args": ["-p", "1234"],
+      "direct": false
+    }
+  ],
+  "launcher": {
+    "version": "0.5.0"
+  }
+}`,
+		))
+
+		mockImageWithExtension = testmocks.NewImage("some/imageWithExtension", "", nil)
+		h.AssertNil(t, mockImageWithExtension.SetWorkingDir("/test-workdir"))
+		h.AssertNil(t, mockImageWithExtension.SetLabel("io.buildpacks.stack.id", "test.stack.id"))
+		h.AssertNil(t, mockImageWithExtension.SetLabel("io.buildpacks.rebasable", "true"))
+		h.AssertNil(t, mockImageWithExtension.SetLabel(
+			"io.buildpacks.lifecycle.metadata",
+			`{
+  "stack": {
+    "runImage": {
+      "image": "some-run-image",
+      "mirrors": [
+        "some-mirror",
+        "other-mirror"
+      ]
+    }
+  },
+  "runImage": {
+    "topLayer": "some-top-layer",
+    "reference": "some-run-image-reference"
+  }
+}`,
+		))
+		h.AssertNil(t, mockImageWithExtension.SetLabel(
+			"io.buildpacks.build.metadata",
+			`{
+  "bom": [
+    {
+      "name": "some-bom-element"
+    }
+  ],
+  "buildpacks": [
+    {
+      "id": "some-buildpack",
+      "version": "some-version"
+    },
+    {
+      "id": "other-buildpack",
+      "version": "other-version"
+    }
+  ],
+    "extensions": [
+    {
+      "id": "some-extension",
+      "version": "some-version"
+    },
+    {
+      "id": "other-extension",
+      "version": "other-version"
+    }
+  ],
+  "processes": [
+    {
+      "type": "other-process",
+      "command": "/other/process",
+      "args": ["opt", "1"],
+      "direct": true
+    },
+    {
+      "type": "web",
+      "command": "/start/web-process",
+      "args": ["-p", "1234"],
+      "direct": false
+    }
+  ],
+  "launcher": {
+    "version": "0.5.0"
+  }
+}`,
+		))
 	})
 
 	it.After(func() {
@@ -115,9 +317,15 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 			when(fmt.Sprintf("daemon is %t", useDaemon), func() {
 				it.Before(func() {
 					if useDaemon {
-						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/image", image.FetchOptions{Daemon: true, PullPolicy: image.PullNever}).Return(mockImage, nil)
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/image", image.FetchOptions{Daemon: true, PullPolicy: image.PullNever}).Return(mockImage, nil).AnyTimes()
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/imageNoRebasable", image.FetchOptions{Daemon: true, PullPolicy: image.PullNever}).Return(mockImageNoRebasable, nil).AnyTimes()
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/imageRebasableWithoutLabel", image.FetchOptions{Daemon: true, PullPolicy: image.PullNever}).Return(mockImageRebasableWithoutLabel, nil).AnyTimes()
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/imageWithExtension", image.FetchOptions{Daemon: true, PullPolicy: image.PullNever}).Return(mockImageWithExtension, nil).AnyTimes()
 					} else {
-						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/image", image.FetchOptions{Daemon: false, PullPolicy: image.PullNever}).Return(mockImage, nil)
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/image", image.FetchOptions{Daemon: false, PullPolicy: image.PullNever}).Return(mockImage, nil).AnyTimes()
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/imageNoRebasable", image.FetchOptions{Daemon: false, PullPolicy: image.PullNever}).Return(mockImageNoRebasable, nil).AnyTimes()
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/imageRebasableWithoutLabel", image.FetchOptions{Daemon: false, PullPolicy: image.PullNever}).Return(mockImageRebasableWithoutLabel, nil).AnyTimes()
+						mockImageFetcher.EXPECT().Fetch(gomock.Any(), "some/imageWithExtension", image.FetchOptions{Daemon: false, PullPolicy: image.PullNever}).Return(mockImageWithExtension, nil).AnyTimes()
 					}
 				})
 
@@ -127,12 +335,51 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 					h.AssertEq(t, info.StackID, "test.stack.id")
 				})
 
+				it("returns the stack ID with extension", func() {
+					infoWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, infoWithExtension.StackID, "test.stack.id")
+				})
+
+				it("returns the stack from runImage.Image if set", func() {
+					h.AssertNil(t, mockImage.SetLabel(
+						"io.buildpacks.lifecycle.metadata",
+						`{
+  "runImage": {
+    "topLayer": "some-top-layer",
+    "reference": "some-run-image-reference",
+    "image":  "is everything"
+  }
+}`,
+					))
+					info, err := subject.InspectImage("some/image", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, info.Stack,
+						files.Stack{RunImage: files.RunImageForExport{Image: "is everything"}})
+				})
+
 				it("returns the stack", func() {
 					info, err := subject.InspectImage("some/image", useDaemon)
 					h.AssertNil(t, err)
 					h.AssertEq(t, info.Stack,
-						platform.StackMetadata{
-							RunImage: platform.StackRunImageMetadata{
+						files.Stack{
+							RunImage: files.RunImageForExport{
+								Image: "some-run-image",
+								Mirrors: []string{
+									"some-mirror",
+									"other-mirror",
+								},
+							},
+						},
+					)
+				})
+
+				it("returns the stack with extension", func() {
+					infoWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, infoWithExtension.Stack,
+						files.Stack{
+							RunImage: files.RunImageForExport{
 								Image: "some-run-image",
 								Mirrors: []string{
 									"some-mirror",
@@ -147,11 +394,46 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 					info, err := subject.InspectImage("some/image", useDaemon)
 					h.AssertNil(t, err)
 					h.AssertEq(t, info.Base,
-						platform.RunImageMetadata{
+						files.RunImageForRebase{
 							TopLayer:  "some-top-layer",
 							Reference: "some-run-image-reference",
 						},
 					)
+				})
+
+				it("returns the base image with extension", func() {
+					infoWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, infoWithExtension.Base,
+						files.RunImageForRebase{
+							TopLayer:  "some-top-layer",
+							Reference: "some-run-image-reference",
+						},
+					)
+				})
+
+				it("returns the rebasable image", func() {
+					info, err := subject.InspectImage("some/image", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, info.Rebasable, true)
+				})
+
+				it("returns the rebasable image true if the label has not been set", func() {
+					info, err := subject.InspectImage("some/imageRebasableWithoutLabel", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, info.Rebasable, true)
+				})
+
+				it("returns the no rebasable image", func() {
+					info, err := subject.InspectImage("some/imageNoRebasable", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, info.Rebasable, false)
+				})
+
+				it("returns the rebasable image with Extension", func() {
+					infoRebasableWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+					h.AssertEq(t, infoRebasableWithExtension.Rebasable, true)
 				})
 
 				it("returns the BOM", func() {
@@ -159,6 +441,15 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 					h.AssertNil(t, err)
 
 					rawBOM, err := json.Marshal(info.BOM)
+					h.AssertNil(t, err)
+					h.AssertContains(t, string(rawBOM), `[{"name":"some-bom-element"`)
+				})
+
+				it("returns the BOM", func() {
+					infoWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+
+					rawBOM, err := json.Marshal(infoWithExtension.BOM)
 					h.AssertNil(t, err)
 					h.AssertContains(t, string(rawBOM), `[{"name":"some-bom-element"`)
 				})
@@ -174,6 +465,28 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 					h.AssertEq(t, info.Buildpacks[1].Version, "other-version")
 				})
 
+				it("returns the buildpacks with extension", func() {
+					infoWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+
+					h.AssertEq(t, len(infoWithExtension.Buildpacks), 2)
+					h.AssertEq(t, infoWithExtension.Buildpacks[0].ID, "some-buildpack")
+					h.AssertEq(t, infoWithExtension.Buildpacks[0].Version, "some-version")
+					h.AssertEq(t, infoWithExtension.Buildpacks[1].ID, "other-buildpack")
+					h.AssertEq(t, infoWithExtension.Buildpacks[1].Version, "other-version")
+				})
+
+				it("returns the extensions", func() {
+					infoWithExtension, err := subject.InspectImage("some/imageWithExtension", useDaemon)
+					h.AssertNil(t, err)
+
+					h.AssertEq(t, len(infoWithExtension.Extensions), 2)
+					h.AssertEq(t, infoWithExtension.Extensions[0].ID, "some-extension")
+					h.AssertEq(t, infoWithExtension.Extensions[0].Version, "some-version")
+					h.AssertEq(t, infoWithExtension.Extensions[1].ID, "other-extension")
+					h.AssertEq(t, infoWithExtension.Extensions[1].Version, "other-version")
+				})
+
 				it("returns the processes setting the web process as default", func() {
 					info, err := subject.InspectImage("some/image", useDaemon)
 					h.AssertNil(t, err)
@@ -181,21 +494,23 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 					h.AssertEq(t, info.Processes,
 						ProcessDetails{
 							DefaultProcess: &launch.Process{
-								Type:    "web",
-								Command: "/start/web-process",
-								Args:    []string{"-p", "1234"},
-								Direct:  false,
+								Type:             "web",
+								Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+								Args:             []string{"-p", "1234"},
+								Direct:           false,
+								WorkingDirectory: "/test-workdir",
 							},
 							OtherProcesses: []launch.Process{
 								{
-									Type:    "other-process",
-									Command: "/other/process",
-									Args:    []string{"opt", "1"},
-									Direct:  true,
+									Type:             "other-process",
+									Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+									Args:             []string{"opt", "1"},
+									Direct:           true,
+									WorkingDirectory: "/test-workdir",
 								},
 							},
 						},
-					)
+						ignorePlatformAPI...)
 				})
 
 				when("Platform API < 0.4", func() {
@@ -211,21 +526,23 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 							h.AssertEq(t, info.Processes,
 								ProcessDetails{
 									DefaultProcess: &launch.Process{
-										Type:    "other-process",
-										Command: "/other/process",
-										Args:    []string{"opt", "1"},
-										Direct:  true,
+										Type:             "other-process",
+										Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+										Args:             []string{"opt", "1"},
+										Direct:           true,
+										WorkingDirectory: "/test-workdir",
 									},
 									OtherProcesses: []launch.Process{
 										{
-											Type:    "web",
-											Command: "/start/web-process",
-											Args:    []string{"-p", "1234"},
-											Direct:  false,
+											Type:             "web",
+											Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+											Args:             []string{"-p", "1234"},
+											Direct:           false,
+											WorkingDirectory: "/test-workdir",
 										},
 									},
 								},
-							)
+								ignorePlatformAPI...)
 						})
 					})
 
@@ -243,20 +560,22 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 									DefaultProcess: nil,
 									OtherProcesses: []launch.Process{
 										{
-											Type:    "other-process",
-											Command: "/other/process",
-											Args:    []string{"opt", "1"},
-											Direct:  true,
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
 										},
 										{
-											Type:    "web",
-											Command: "/start/web-process",
-											Args:    []string{"-p", "1234"},
-											Direct:  false,
+											Type:             "web",
+											Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+											Args:             []string{"-p", "1234"},
+											Direct:           false,
+											WorkingDirectory: "/test-workdir",
 										},
 									},
 								},
-							)
+								ignorePlatformAPI...)
 						})
 					})
 
@@ -283,18 +602,19 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 								DefaultProcess: nil,
 								OtherProcesses: []launch.Process{
 									{
-										Type:    "other-process",
-										Command: "/other/process",
-										Args:    []string{"opt", "1"},
-										Direct:  true,
+										Type:             "other-process",
+										Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+										Args:             []string{"opt", "1"},
+										Direct:           true,
+										WorkingDirectory: "/test-workdir",
 									},
 								},
 							},
-						)
+							ignorePlatformAPI...)
 					})
 				})
 
-				when("Platform API >= 0.4", func() {
+				when("Platform API >= 0.4 and <= 0.8", func() {
 					it.Before(func() {
 						h.AssertNil(t, mockImage.SetEnv("CNB_PLATFORM_API", "0.4"))
 					})
@@ -326,20 +646,22 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 									DefaultProcess: nil,
 									OtherProcesses: []launch.Process{
 										{
-											Type:    "other-process",
-											Command: "/other/process",
-											Args:    []string{"opt", "1"},
-											Direct:  true,
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
 										},
 										{
-											Type:    "web",
-											Command: "/start/web-process",
-											Args:    []string{"-p", "1234"},
-											Direct:  false,
+											Type:             "web",
+											Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+											Args:             []string{"-p", "1234"},
+											Direct:           false,
+											WorkingDirectory: "/test-workdir",
 										},
 									},
 								},
-							)
+								ignorePlatformAPI...)
 						})
 					})
 
@@ -357,21 +679,23 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 							h.AssertEq(t, info.Processes,
 								ProcessDetails{
 									DefaultProcess: &launch.Process{
-										Type:    "web",
-										Command: "/start/web-process",
-										Args:    []string{"-p", "1234"},
-										Direct:  false,
+										Type:             "web",
+										Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+										Args:             []string{"-p", "1234"},
+										Direct:           false,
+										WorkingDirectory: "/test-workdir",
 									},
 									OtherProcesses: []launch.Process{
 										{
-											Type:    "other-process",
-											Command: "/other/process",
-											Args:    []string{"opt", "1"},
-											Direct:  true,
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
 										},
 									},
 								},
-							)
+								ignorePlatformAPI...)
 						})
 					})
 
@@ -389,20 +713,22 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 									DefaultProcess: nil,
 									OtherProcesses: []launch.Process{
 										{
-											Type:    "other-process",
-											Command: "/other/process",
-											Args:    []string{"opt", "1"},
-											Direct:  true,
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
 										},
 										{
-											Type:    "web",
-											Command: "/start/web-process",
-											Args:    []string{"-p", "1234"},
-											Direct:  false,
+											Type:             "web",
+											Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+											Args:             []string{"-p", "1234"},
+											Direct:           false,
+											WorkingDirectory: "/test-workdir",
 										},
 									},
 								},
-							)
+								ignorePlatformAPI...)
 						})
 					})
 
@@ -432,14 +758,15 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 									DefaultProcess: nil,
 									OtherProcesses: []launch.Process{
 										{
-											Type:    "other-process",
-											Command: "/other/process",
-											Args:    []string{"opt", "1"},
-											Direct:  true,
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
 										},
 									},
 								},
-							)
+								ignorePlatformAPI...)
 						})
 					})
 
@@ -456,20 +783,22 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 										DefaultProcess: nil,
 										OtherProcesses: []launch.Process{
 											{
-												Type:    "other-process",
-												Command: "/other/process",
-												Args:    []string{"opt", "1"},
-												Direct:  true,
+												Type:             "other-process",
+												Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+												Args:             []string{"opt", "1"},
+												Direct:           true,
+												WorkingDirectory: "/test-workdir",
 											},
 											{
-												Type:    "web",
-												Command: "/start/web-process",
-												Args:    []string{"-p", "1234"},
-												Direct:  false,
+												Type:             "web",
+												Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+												Args:             []string{"-p", "1234"},
+												Direct:           false,
+												WorkingDirectory: "/test-workdir",
 											},
 										},
 									},
-								)
+									ignorePlatformAPI...)
 							})
 						})
 
@@ -485,20 +814,22 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 										DefaultProcess: nil,
 										OtherProcesses: []launch.Process{
 											{
-												Type:    "other-process",
-												Command: "/other/process",
-												Args:    []string{"opt", "1"},
-												Direct:  true,
+												Type:             "other-process",
+												Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+												Args:             []string{"opt", "1"},
+												Direct:           true,
+												WorkingDirectory: "/test-workdir",
 											},
 											{
-												Type:    "web",
-												Command: "/start/web-process",
-												Args:    []string{"-p", "1234"},
-												Direct:  false,
+												Type:             "web",
+												Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+												Args:             []string{"-p", "1234"},
+												Direct:           false,
+												WorkingDirectory: "/test-workdir",
 											},
 										},
 									},
-								)
+									ignorePlatformAPI...)
 							})
 						})
 
@@ -512,22 +843,92 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 								h.AssertEq(t, info.Processes,
 									ProcessDetails{
 										DefaultProcess: &launch.Process{
-											Type:    "other-process",
-											Command: "/other/process",
-											Args:    []string{"opt", "1"},
-											Direct:  true,
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
 										},
 										OtherProcesses: []launch.Process{
 											{
-												Type:    "web",
-												Command: "/start/web-process",
-												Args:    []string{"-p", "1234"},
-												Direct:  false,
+												Type:             "web",
+												Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+												Args:             []string{"-p", "1234"},
+												Direct:           false,
+												WorkingDirectory: "/test-workdir",
 											},
 										},
 									},
-								)
+									ignorePlatformAPI...)
 							})
+						})
+					})
+				})
+
+				when("Platform API > 0.8", func() {
+					when("working-dir is set", func() {
+						it("returns process with working directory if available", func() {
+							h.AssertNil(t, mockImage.SetLabel(
+								"io.buildpacks.build.metadata",
+								`{
+					 "processes": [
+					   {
+					     "type": "other-process",
+					     "command": "/other/process",
+					     "args": ["opt", "1"],
+					     "direct": true,
+						 "working-dir": "/other-workdir"
+					   }
+					 ]
+					}`,
+							))
+
+							info, err := subject.InspectImage("some/image", useDaemon)
+							h.AssertNil(t, err)
+							fmt.Print(info)
+
+							h.AssertEq(t, info.Processes,
+								ProcessDetails{
+									DefaultProcess: nil,
+									OtherProcesses: []launch.Process{
+										{
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/other-workdir",
+										},
+									},
+								},
+								ignorePlatformAPI...)
+						})
+					})
+
+					when("working-dir is not set", func() {
+						it("returns process with working directory from image", func() {
+							info, err := subject.InspectImage("some/image", useDaemon)
+							h.AssertNil(t, err)
+
+							h.AssertEq(t, info.Processes,
+								ProcessDetails{
+									DefaultProcess: &launch.Process{
+										Type:             "web",
+										Command:          launch.RawCommand{Entries: []string{"/start/web-process"}},
+										Args:             []string{"-p", "1234"},
+										Direct:           false,
+										WorkingDirectory: "/test-workdir",
+									},
+									OtherProcesses: []launch.Process{
+										{
+											Type:             "other-process",
+											Command:          launch.RawCommand{Entries: []string{"/other/process"}},
+											Args:             []string{"opt", "1"},
+											Direct:           true,
+											WorkingDirectory: "/test-workdir",
+										},
+									},
+								},
+								ignorePlatformAPI...)
 						})
 					})
 				})
@@ -561,7 +962,7 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 				Return(fakes.NewImage("missing/labels", "", nil), nil)
 			info, err := subject.InspectImage("missing/labels", true)
 			h.AssertNil(t, err)
-			h.AssertEq(t, info, &ImageInfo{})
+			h.AssertEq(t, info, &ImageInfo{Rebasable: true}, ignorePlatformAPI...)
 		})
 	})
 
@@ -614,7 +1015,7 @@ func testInspectImage(t *testing.T, when spec.G, it spec.S) {
 			info, err := subject.InspectImage("old/image", true)
 			h.AssertNil(t, err)
 			h.AssertEq(t, info.Base,
-				platform.RunImageMetadata{
+				files.RunImageForRebase{
 					TopLayer:  "some-top-layer",
 					Reference: "",
 				},

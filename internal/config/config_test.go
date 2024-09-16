@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +27,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 
 	it.Before(func() {
 		var err error
-		tmpDir, err = ioutil.TempDir("", "pack.config.test.")
+		tmpDir, err = os.MkdirTemp("", "pack.config.test.")
 		h.AssertNil(t, err)
 		configPath = filepath.Join(tmpDir, "config.toml")
 	})
@@ -47,6 +46,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 				h.AssertEq(t, len(subject.RunImages), 0)
 				h.AssertEq(t, subject.Experimental, false)
 				h.AssertEq(t, len(subject.RegistryMirrors), 0)
+				h.AssertEq(t, subject.LayoutRepositoryDir, "")
 			})
 		})
 	})
@@ -74,7 +74,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 					},
 				}, configPath))
 
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), `default-builder-image = "some/builder"`)
 				h.AssertContains(t, string(b), `[[run-images]]
@@ -95,14 +95,14 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 
 		when("config on disk", func() {
 			it.Before(func() {
-				h.AssertNil(t, ioutil.WriteFile(configPath, []byte("some-old-contents"), 0777))
+				h.AssertNil(t, os.WriteFile(configPath, []byte("some-old-contents"), 0777))
 			})
 
 			it("replaces the file", func() {
 				h.AssertNil(t, config.Write(config.Config{
 					DefaultBuilder: "some/builder",
 				}, configPath))
-				b, err := ioutil.ReadFile(configPath)
+				b, err := os.ReadFile(configPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), `default-builder-image = "some/builder"`)
 				h.AssertNotContains(t, string(b), "some-old-contents")
@@ -116,7 +116,7 @@ func testConfig(t *testing.T, when spec.G, it spec.S) {
 					DefaultBuilder: "some/builder",
 				}, missingDirConfigPath))
 
-				b, err := ioutil.ReadFile(missingDirConfigPath)
+				b, err := os.ReadFile(missingDirConfigPath)
 				h.AssertNil(t, err)
 				h.AssertContains(t, string(b), `default-builder-image = "some/builder"`)
 			})

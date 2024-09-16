@@ -3,6 +3,7 @@ image_name: "{{.image_name}}"
 remote_info:
 local_info:
   stack: pack.test.stack
+  rebasable: {{.rebasable}}
   base_image:
     top_layer: "{{.base_image_top_layer}}"
     reference: "{{.base_image_id}}"
@@ -14,6 +15,7 @@ local_info:
   buildpacks:
     - id: simple/layers
       version: simple-layers-version
+  extensions: []
   processes:
     - type: web
       shell: bash
@@ -21,8 +23,10 @@ local_info:
       default: true
       args:
         - '8080'
+      working-dir: "{{ ( StringsEscapeBackslash .image_workdir ) }}"
     - type: hello
       shell: ''
       command: "{{.hello_command}}"
       default: false
       args: [ {{ ( StringsJoin (StringsDoubleQuote .hello_args) ",") }} ]
+      working-dir: "{{ ( StringsEscapeBackslash .image_workdir ) }}"

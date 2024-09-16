@@ -4,9 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/docker/docker/api/types"
 	dcontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
 	"github.com/pkg/errors"
 
 	"github.com/buildpacks/pack/internal/container"
@@ -16,11 +14,11 @@ type Phase struct {
 	name                string
 	infoWriter          io.Writer
 	errorWriter         io.Writer
-	docker              client.CommonAPIClient
+	docker              DockerClient
 	handler             container.Handler
 	ctrConf             *dcontainer.Config
 	hostConf            *dcontainer.HostConfig
-	ctr                 dcontainer.ContainerCreateCreatedBody
+	ctr                 dcontainer.CreateResponse
 	uid, gid            int
 	appPath             string
 	containerOps        []ContainerOperation
@@ -65,5 +63,5 @@ func (p *Phase) Run(ctx context.Context) error {
 }
 
 func (p *Phase) Cleanup() error {
-	return p.docker.ContainerRemove(context.Background(), p.ctr.ID, types.ContainerRemoveOptions{Force: true})
+	return p.docker.ContainerRemove(context.Background(), p.ctr.ID, dcontainer.RemoveOptions{Force: true})
 }

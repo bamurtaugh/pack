@@ -37,13 +37,13 @@ func testTermui(t *testing.T, when spec.G, it spec.S) {
 	it("performs the lifecycle", func() {
 		var (
 			fakeBuild           = make(chan bool, 1)
-			fakeBodyChan        = make(chan dcontainer.ContainerWaitOKBody, 1)
+			fakeBodyChan        = make(chan dcontainer.WaitResponse, 1)
 			fakeApp             = fakes.NewApp()
 			r, w                = io.Pipe()
 			fakeDockerStdWriter = fakes.NewDockerStdWriter(w)
 
 			fakeBuilder = fakes.NewBuilder("some/basename",
-				[]dist.BuildpackInfo{
+				[]dist.ModuleInfo{
 					{ID: "some/buildpack-1", Version: "0.0.1", Homepage: "https://some/buildpack-1"},
 					{ID: "some/buildpack-2", Version: "0.0.2", Homepage: "https://some/buildpack-2"},
 				},
@@ -62,14 +62,14 @@ func testTermui(t *testing.T, when spec.G, it spec.S) {
 				bldr:          fakeBuilder,
 				runImageName:  "some/run-image-name",
 				app:           fakeApp,
-				buildpackChan: make(chan dist.BuildpackInfo, 10),
+				buildpackChan: make(chan dist.ModuleInfo, 10),
 				textChan:      make(chan string, 10),
 				nodes:         map[string]*tview.TreeNode{},
 			}
 		)
 
 		defer func() {
-			fakeBodyChan <- dcontainer.ContainerWaitOKBody{StatusCode: 0}
+			fakeBodyChan <- dcontainer.WaitResponse{StatusCode: 0}
 			fakeBuild <- true
 			w.Close()
 			fakeApp.StopRunning()
@@ -142,7 +142,7 @@ func testTermui(t *testing.T, when spec.G, it spec.S) {
 		h.AssertFalse(t, bpChildren2[0].GetChildren()[0].GetReference().(*tar.Header).FileInfo().IsDir())
 
 		// finish build
-		fakeBodyChan <- dcontainer.ContainerWaitOKBody{StatusCode: 0}
+		fakeBodyChan <- dcontainer.WaitResponse{StatusCode: 0}
 		w.Close()
 		time.Sleep(500 * time.Millisecond)
 		fakeBuild <- true
@@ -154,13 +154,13 @@ func testTermui(t *testing.T, when spec.G, it spec.S) {
 	it("performs the lifecycle (when the builder is untrusted)", func() {
 		var (
 			fakeBuild           = make(chan bool, 1)
-			fakeBodyChan        = make(chan dcontainer.ContainerWaitOKBody, 1)
+			fakeBodyChan        = make(chan dcontainer.WaitResponse, 1)
 			fakeApp             = fakes.NewApp()
 			r, w                = io.Pipe()
 			fakeDockerStdWriter = fakes.NewDockerStdWriter(w)
 
 			fakeBuilder = fakes.NewBuilder("some/basename",
-				[]dist.BuildpackInfo{
+				[]dist.ModuleInfo{
 					{ID: "some/buildpack-1", Version: "0.0.1", Homepage: "https://some/buildpack-1"},
 					{ID: "some/buildpack-2", Version: "0.0.2", Homepage: "https://some/buildpack-2"},
 				},
@@ -179,13 +179,13 @@ func testTermui(t *testing.T, when spec.G, it spec.S) {
 				bldr:          fakeBuilder,
 				runImageName:  "some/run-image-name",
 				app:           fakeApp,
-				buildpackChan: make(chan dist.BuildpackInfo, 10),
+				buildpackChan: make(chan dist.ModuleInfo, 10),
 				textChan:      make(chan string, 10),
 			}
 		)
 
 		defer func() {
-			fakeBodyChan <- dcontainer.ContainerWaitOKBody{StatusCode: 0}
+			fakeBodyChan <- dcontainer.WaitResponse{StatusCode: 0}
 			fakeBuild <- true
 			w.Close()
 			fakeApp.StopRunning()
@@ -226,7 +226,7 @@ func testTermui(t *testing.T, when spec.G, it spec.S) {
 		}, eventuallyInterval, eventuallyDuration)
 
 		// finish build
-		fakeBodyChan <- dcontainer.ContainerWaitOKBody{StatusCode: 1}
+		fakeBodyChan <- dcontainer.WaitResponse{StatusCode: 1}
 		w.Close()
 		time.Sleep(500 * time.Millisecond)
 		fakeBuild <- true

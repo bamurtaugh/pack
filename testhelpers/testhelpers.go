@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 	"os"
@@ -22,16 +21,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/buildpacks/imgutil/fakes"
+
 	dockertypes "github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
+	dcontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/go-git/go-git/v5"
 	"github.com/google/go-cmp/cmp"
 	"github.com/heroku/color"
 	"github.com/pkg/errors"
-	"gopkg.in/src-d/go-git.v4"
 
+	"github.com/buildpacks/pack/internal/container"
 	"github.com/buildpacks/pack/internal/stringset"
 	"github.com/buildpacks/pack/internal/style"
 	"github.com/buildpacks/pack/pkg/archive"
@@ -48,9 +51,9 @@ func RandString(n int) string {
 }
 
 // Assert deep equality (and provide useful difference as a test failure)
-func AssertEq(t *testing.T, actual, expected interface{}) {
+func AssertEq(t *testing.T, actual, expected interface{}, opts ...cmp.Option) {
 	t.Helper()
-	if diff := cmp.Diff(expected, actual); diff != "" {
+	if diff := cmp.Diff(expected, actual, opts...); diff != "" {
 		t.Fatal(diff)
 	}
 }
@@ -174,6 +177,33 @@ func AssertNotContains(t *testing.T, actual, expected string) {
 	t.Helper()
 	if strings.Contains(actual, expected) {
 		t.Fatalf("Expected '%s' to not contain '%s'", actual, expected)
+	}
+}
+
+type KeyValue[k comparable, v any] struct {
+	key   k
+	value v
+}
+
+func NewKeyValue[k comparable, v any](key k, value v) KeyValue[k, v] {
+	return KeyValue[k, v]{key: key, value: value}
+}
+
+func AssertMapContains[key comparable, value any](t *testing.T, actual map[key]value, expected ...KeyValue[key, value]) {
+	t.Helper()
+	for _, i := range expected {
+		if v, ok := actual[i.key]; !ok || !reflect.DeepEqual(v, i.value) {
+			t.Fatalf("Expected %s to contain elements %s", reflect.ValueOf(actual), reflect.ValueOf(expected))
+		}
+	}
+}
+
+func AssertMapNotContains[key comparable, value any](t *testing.T, actual map[key]value, expected ...KeyValue[key, value]) {
+	t.Helper()
+	for _, i := range expected {
+		if v, ok := actual[i.key]; ok && reflect.DeepEqual(v, i.value) {
+			t.Fatalf("Expected %s to not contain elements %s", reflect.ValueOf(actual), reflect.ValueOf(expected))
+		}
 	}
 }
 
@@ -381,7 +411,7 @@ func CheckImageBuildResult(response dockertypes.ImageBuildResponse, err error) e
 }
 
 func checkResponse(responseBody io.Reader) error {
-	body, err := ioutil.ReadAll(responseBody)
+	body, err := io.ReadAll(responseBody)
 	if err != nil {
 		return errors.Wrap(err, "reading body")
 	}
@@ -425,7 +455,7 @@ func DockerRmi(dockerCli client.CommonAPIClient, repoNames ...string) error {
 		_, e := dockerCli.ImageRemove(
 			ctx,
 			name,
-			dockertypes.ImageRemoveOptions{Force: true, PruneChildren: true},
+			image.RemoveOptions{Force: true, PruneChildren: true},
 		)
 		if e != nil && err == nil {
 			err = e
@@ -435,7 +465,7 @@ func DockerRmi(dockerCli client.CommonAPIClient, repoNames ...string) error {
 }
 
 func PushImage(dockerCli client.CommonAPIClient, ref string, registryConfig *TestRegistryConfig) error {
-	rc, err := dockerCli.ImagePush(context.Background(), ref, dockertypes.ImagePushOptions{RegistryAuth: registryConfig.RegistryAuth()})
+	rc, err := dockerCli.ImagePush(context.Background(), ref, image.PushOptions{RegistryAuth: registryConfig.RegistryAuth()})
 	if err != nil {
 		return errors.Wrap(err, "pushing image")
 	}
@@ -469,7 +499,7 @@ func HTTPGetE(url string, headers map[string]string) (string, error) {
 	if resp.StatusCode >= 300 {
 		return "", fmt.Errorf("HTTP Status was bad: %s => %d", url, resp.StatusCode)
 	}
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", errors.Wrap(err, "reading body")
 	}
@@ -524,11 +554,11 @@ func RunE(cmd *exec.Cmd) (string, error) {
 }
 
 func PullImageWithAuth(dockerCli client.CommonAPIClient, ref, registryAuth string) error {
-	rc, err := dockerCli.ImagePull(context.Background(), ref, dockertypes.ImagePullOptions{RegistryAuth: registryAuth})
+	rc, err := dockerCli.ImagePull(context.Background(), ref, image.PullOptions{RegistryAuth: registryAuth})
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(ioutil.Discard, rc); err != nil {
+	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return err
 	}
 	return rc.Close()
@@ -576,12 +606,16 @@ func RecursiveCopy(t *testing.T, src, dst string) {
 }
 
 func RecursiveCopyE(src, dst string) error {
-	fis, err := ioutil.ReadDir(src)
+	fis, err := os.ReadDir(src)
 	if err != nil {
 		return err
 	}
 
-	for _, fi := range fis {
+	for _, entry := range fis {
+		fi, err := entry.Info()
+		if err != nil {
+			return err
+		}
 		if fi.Mode().IsRegular() {
 			err = CopyFileE(filepath.Join(src, fi.Name()), filepath.Join(dst, fi.Name()))
 			if err != nil {
@@ -629,9 +663,9 @@ func SkipUnless(t *testing.T, expression bool, reason string) {
 }
 
 func RunContainer(ctx context.Context, dockerCli client.CommonAPIClient, id string, stdout io.Writer, stderr io.Writer) error {
-	bodyChan, errChan := dockerCli.ContainerWait(ctx, id, container.WaitConditionNextExit)
+	bodyChan, errChan := container.ContainerWaitWrapper(ctx, dockerCli, id, dcontainer.WaitConditionNextExit)
 
-	logs, err := dockerCli.ContainerAttach(ctx, id, dockertypes.ContainerAttachOptions{
+	logs, err := dockerCli.ContainerAttach(ctx, id, dcontainer.AttachOptions{
 		Stream: true,
 		Stdout: true,
 		Stderr: true,
@@ -640,7 +674,7 @@ func RunContainer(ctx context.Context, dockerCli client.CommonAPIClient, id stri
 		return err
 	}
 
-	if err := dockerCli.ContainerStart(ctx, id, dockertypes.ContainerStartOptions{}); err != nil {
+	if err := dockerCli.ContainerStart(ctx, id, dcontainer.StartOptions{}); err != nil {
 		return errors.Wrap(err, "container start")
 	}
 
@@ -664,7 +698,7 @@ func RunContainer(ctx context.Context, dockerCli client.CommonAPIClient, id stri
 func CreateTGZ(t *testing.T, srcDir, tarDir string, mode int64) string {
 	t.Helper()
 
-	fh, err := ioutil.TempFile("", "*.tgz")
+	fh, err := os.CreateTemp("", "*.tgz")
 	AssertNil(t, err)
 	defer fh.Close()
 
@@ -679,7 +713,7 @@ func CreateTGZ(t *testing.T, srcDir, tarDir string, mode int64) string {
 func CreateTAR(t *testing.T, srcDir, tarDir string, mode int64) string {
 	t.Helper()
 
-	fh, err := ioutil.TempFile("", "*.tgz")
+	fh, err := os.CreateTemp("", "*.tgz")
 	AssertNil(t, err)
 	defer fh.Close()
 
@@ -702,9 +736,11 @@ func RecursiveCopyNow(t *testing.T, src, dst string) {
 	err := os.MkdirAll(dst, 0750)
 	AssertNil(t, err)
 
-	fis, err := ioutil.ReadDir(src)
+	fis, err := os.ReadDir(src)
 	AssertNil(t, err)
-	for _, fi := range fis {
+	for _, entry := range fis {
+		fi, err := entry.Info()
+		AssertNil(t, err)
 		if fi.Mode().IsRegular() {
 			srcFile, err := os.Open(filepath.Join(filepath.Clean(src), fi.Name()))
 			AssertNil(t, err)
@@ -755,7 +791,7 @@ func tarFileContents(t *testing.T, tarfile, path string) (exist bool, contents s
 		AssertNil(t, err)
 
 		if header.Name == path {
-			buf, err := ioutil.ReadAll(tr)
+			buf, err := io.ReadAll(tr)
 			AssertNil(t, err)
 			return true, string(buf)
 		}
@@ -795,12 +831,14 @@ func tarHasFile(t *testing.T, tarFile, path string) (exist bool) {
 	return false
 }
 
-func AssertBuildpacksHaveDescriptors(t *testing.T, bps []buildpack.Buildpack, descriptors []dist.BuildpackDescriptor) {
-	AssertEq(t, len(bps), len(descriptors))
-	for _, bp := range bps {
+func AssertBuildpacksHaveDescriptors(t *testing.T, modules []buildpack.BuildModule, descriptors []dist.BuildpackDescriptor) {
+	AssertEq(t, len(modules), len(descriptors))
+	for _, mod := range modules {
 		found := false
+		modDesc, ok := mod.Descriptor().(*dist.BuildpackDescriptor)
+		AssertEq(t, ok, true)
 		for _, descriptor := range descriptors {
-			if diff := cmp.Diff(bp.Descriptor(), descriptor); diff == "" {
+			if diff := cmp.Diff(*modDesc, descriptor); diff == "" {
 				found = true
 				break
 			}
@@ -825,6 +863,13 @@ func AssertGitHeadEq(t *testing.T, path1, path2 string) {
 	AssertEq(t, h1.Hash().String(), h2.Hash().String())
 }
 
+func AssertBlobsLen(t *testing.T, path string, expected int) {
+	t.Helper()
+	fis, err := os.ReadDir(filepath.Join(path, "blobs", "sha256"))
+	AssertNil(t, err)
+	AssertEq(t, len(fis), expected)
+}
+
 func MockWriterAndOutput() (*color.Console, func() string) {
 	r, w, _ := os.Pipe()
 	console := color.NewConsole(w)
@@ -835,4 +880,22 @@ func MockWriterAndOutput() (*color.Console, func() string) {
 		_ = r.Close()
 		return b.String()
 	}
+}
+
+func LayerFileName(bp buildpack.BuildModule) string {
+	return fmt.Sprintf("%s.%s.tar", bp.Descriptor().Info().ID, bp.Descriptor().Info().Version)
+}
+
+type FakeAddedLayerImage struct {
+	*fakes.Image
+	addedLayersOrder []string
+}
+
+func (f *FakeAddedLayerImage) AddedLayersOrder() []string {
+	return f.addedLayersOrder
+}
+
+func (f *FakeAddedLayerImage) AddLayerWithDiffID(path, diffID string) error {
+	f.addedLayersOrder = append(f.addedLayersOrder, path)
+	return f.Image.AddLayerWithDiffID(path, diffID)
 }

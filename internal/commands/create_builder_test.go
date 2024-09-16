@@ -2,7 +2,7 @@ package commands_test
 
 import (
 	"bytes"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -39,7 +39,7 @@ func testCreateBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 	it.Before(func() {
 		var err error
-		tmpDir, err = ioutil.TempDir("", "create-builder-test")
+		tmpDir, err = os.MkdirTemp("", "create-builder-test")
 		h.AssertNil(t, err)
 		builderConfigPath = filepath.Join(tmpDir, "builder.toml")
 		cfg = config.Config{}
@@ -56,7 +56,7 @@ func testCreateBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 	when("#CreateBuilder", func() {
 		it("gives deprecation warning", func() {
-			h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(validConfig), 0666))
+			h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(validConfig), 0666))
 			mockClient.EXPECT().CreateBuilder(gomock.Any(), gomock.Any()).Return(nil)
 			command.SetArgs([]string{
 				"some/builder",
@@ -123,7 +123,7 @@ func testCreateBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 		when("warnings encountered in builder.toml", func() {
 			it.Before(func() {
-				h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(`
+				h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(`
 [[buildpacks]]
   id = "some.buildpack"
 `), 0666))
@@ -144,7 +144,7 @@ func testCreateBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 
 		when("uses --builder-config", func() {
 			it.Before(func() {
-				h.AssertNil(t, ioutil.WriteFile(builderConfigPath, []byte(validConfig), 0666))
+				h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(validConfig), 0666))
 			})
 
 			it("errors with a descriptive message", func() {
@@ -162,6 +162,20 @@ func testCreateBuilderCommand(t *testing.T, when spec.G, it spec.S) {
 					"some/builder",
 				})
 				h.AssertError(t, command.Execute(), "Please provide a builder config path")
+			})
+		})
+
+		when("builder config has extensions but experimental isn't set in the config", func() {
+			it.Before(func() {
+				h.AssertNil(t, os.WriteFile(builderConfigPath, []byte(validConfigWithExtensions), 0666))
+			})
+
+			it("errors", func() {
+				command.SetArgs([]string{
+					"some/builder",
+					"--config", builderConfigPath,
+				})
+				h.AssertError(t, command.Execute(), "builder config contains image extensions; support for image extensions is currently experimental")
 			})
 		})
 	})

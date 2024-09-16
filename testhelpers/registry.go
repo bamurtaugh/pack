@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/url"
 	"os"
@@ -15,10 +14,11 @@ import (
 
 	dockertypes "github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
+	dockerregistry "github.com/docker/docker/api/types/registry"
 	"github.com/docker/go-connections/nat"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"golang.org/x/crypto/bcrypt"
-	"gopkg.in/src-d/go-git.v4"
-	"gopkg.in/src-d/go-git.v4/plumbing/object"
 
 	"github.com/buildpacks/pack/pkg/archive"
 )
@@ -120,8 +120,8 @@ func waitForRegistryToBeAvailable(t *testing.T, registryConfig *TestRegistryConf
 	}
 }
 
-func (rc *TestRegistryConfig) AuthConfig() dockertypes.AuthConfig {
-	return dockertypes.AuthConfig{
+func (rc *TestRegistryConfig) AuthConfig() dockerregistry.AuthConfig {
+	return dockerregistry.AuthConfig{
 		Username:      rc.username,
 		Password:      rc.password,
 		ServerAddress: RegistryHost(rc.RunRegistryHost, rc.RunRegistryPort),
@@ -130,7 +130,7 @@ func (rc *TestRegistryConfig) AuthConfig() dockertypes.AuthConfig {
 
 func (rc *TestRegistryConfig) Login(t *testing.T, username string, password string) {
 	Eventually(t, func() bool {
-		_, err := dockerCli(t).RegistryLogin(context.Background(), dockertypes.AuthConfig{
+		_, err := dockerCli(t).RegistryLogin(context.Background(), dockerregistry.AuthConfig{
 			Username:      username,
 			Password:      password,
 			ServerAddress: RegistryHost(rc.RunRegistryHost, rc.RunRegistryPort),
@@ -169,7 +169,7 @@ func startRegistry(t *testing.T, runRegistryName, username, password string) (st
 	err = dockerCli(t).CopyToContainer(ctx, ctr.ID, "/", htpasswdTar, dockertypes.CopyToContainerOptions{})
 	AssertNil(t, err)
 
-	err = dockerCli(t).ContainerStart(ctx, ctr.ID, dockertypes.ContainerStartOptions{})
+	err = dockerCli(t).ContainerStart(ctx, ctr.ID, dockercontainer.StartOptions{})
 	AssertNil(t, err)
 
 	runRegistryPort, err := waitForPortBinding(t, ctr.ID, "5000/tcp", 30*time.Second)
@@ -254,10 +254,10 @@ func generateHtpasswd(t *testing.T, username string, password string) io.ReadClo
 }
 
 func setupDockerConfigWithAuth(t *testing.T, username string, password string, runRegistryHost string, runRegistryPort string) string {
-	dockerConfigDir, err := ioutil.TempDir("", "pack.test.docker.config.dir")
+	dockerConfigDir, err := os.MkdirTemp("", "pack.test.docker.config.dir")
 	AssertNil(t, err)
 
-	AssertNil(t, ioutil.WriteFile(filepath.Join(dockerConfigDir, "config.json"), []byte(fmt.Sprintf(`{
+	AssertNil(t, os.WriteFile(filepath.Join(dockerConfigDir, "config.json"), []byte(fmt.Sprintf(`{
 			  "auths": {
 			    "%s": {
 			      "auth": "%s"

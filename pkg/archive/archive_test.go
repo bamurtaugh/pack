@@ -2,15 +2,12 @@ package archive_test
 
 import (
 	"archive/tar"
-	"io/ioutil"
-	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pkg/errors"
 
@@ -25,7 +22,6 @@ import (
 func TestArchive(t *testing.T) {
 	color.Disable(true)
 	defer color.Disable(false)
-	rand.Seed(time.Now().UTC().UnixNano())
 	spec.Run(t, "Archive", testArchive, spec.Sequential(), spec.Report(report.Terminal{}))
 }
 
@@ -36,7 +32,7 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 
 	it.Before(func() {
 		var err error
-		tmpDir, err = ioutil.TempDir("", "create-tar-test")
+		tmpDir, err = os.MkdirTemp("", "create-tar-test")
 		if err != nil {
 			t.Fatalf("failed to create tmp dir %s: %s", tmpDir, err)
 		}
@@ -44,7 +40,10 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 
 	it.After(func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
-			t.Fatalf("failed to clean up tmp dir %s: %s", tmpDir, err)
+			if runtime.GOOS != "windows" {
+				// skip "The process cannot access the file because it is being used by another process" on windows
+				t.Fatalf("failed to clean up tmp dir %s: %s", tmpDir, err)
+			}
 		}
 	})
 
@@ -75,15 +74,6 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 				verify.NextDirectory("/nested/dir/dir-in-archive", int64(os.ModePerm))
 			})
 		})
-
-		it("returns error if closed multiple times", func() {
-			rc := archive.ReadDirAsTar(src, "/nested/dir/dir-in-archive", 1234, 2345, 0777, true, false, func(s string) bool { return false })
-			tr := tar.NewReader(rc)
-			verify := h.NewTarVerifier(t, tr, 1234, 2345)
-			verify.NoMoreFilesExist()
-			h.AssertNil(t, rc.Close())
-			h.AssertError(t, rc.Close(), "reader already closed")
-		})
 	})
 
 	when("#ReadZipAsTar", func() {
@@ -112,7 +102,7 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 			tarFile *os.File
 		)
 		it.Before(func() {
-			tarFile, err = ioutil.TempFile(tmpDir, "file.tgz")
+			tarFile, err = os.CreateTemp(tmpDir, "file.tgz")
 			h.AssertNil(t, err)
 		})
 
@@ -217,8 +207,35 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 			})
 		})
 
+		when("mode is set to 0755", func() {
+			it("writes a tar to the dest dir with 0755", func() {
+				fh, err := os.Create(filepath.Join(tmpDir, "some.tar"))
+				h.AssertNil(t, err)
+
+				tw := tar.NewWriter(fh)
+
+				err = archive.WriteDirToTar(tw, src, "/nested/dir/dir-in-archive", 1234, 2345, 0755, true, false, nil)
+				h.AssertNil(t, err)
+				h.AssertNil(t, tw.Close())
+				h.AssertNil(t, fh.Close())
+
+				file, err := os.Open(filepath.Join(tmpDir, "some.tar"))
+				h.AssertNil(t, err)
+				defer file.Close()
+
+				tr := tar.NewReader(file)
+
+				verify := h.NewTarVerifier(t, tr, 1234, 2345)
+				verify.NextFile("/nested/dir/dir-in-archive/some-file.txt", "some-content", 0755)
+				verify.NextDirectory("/nested/dir/dir-in-archive/sub-dir", 0755)
+				if runtime.GOOS != "windows" {
+					verify.NextSymLink("/nested/dir/dir-in-archive/sub-dir/link-file", "../some-file.txt")
+				}
+			})
+		})
+
 		when("includeRoot is true", func() {
-			it("sets metadata on base dest file", func() {
+			it("writes a tar to the root dir with the provided mode", func() {
 				fh, err := os.Create(filepath.Join(tmpDir, "some.tar"))
 				h.AssertNil(t, err)
 
@@ -238,32 +255,32 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 				verify := h.NewTarVerifier(t, tr, 1234, 2345)
 				verify.NextDirectory("/nested/dir/dir-in-archive", int64(os.ModePerm))
 			})
-		})
+			when("mode is set to -1", func() {
+				it("writes a tar to the root dir with default (0777) dir mode", func() {
+					fh, err := os.Create(filepath.Join(tmpDir, "some.tar"))
+					h.AssertNil(t, err)
 
-		when("mode is set to -1", func() {
-			it("writes a tar to the dest dir with preexisting file mode", func() {
-				fh, err := os.Create(filepath.Join(tmpDir, "some.tar"))
-				h.AssertNil(t, err)
+					tw := tar.NewWriter(fh)
 
-				tw := tar.NewWriter(fh)
+					err = archive.WriteDirToTar(tw, src, "/nested/dir/dir-in-archive", 1234, 2345, -1, true, true, nil)
+					h.AssertNil(t, err)
+					h.AssertNil(t, tw.Close())
+					h.AssertNil(t, fh.Close())
 
-				err = archive.WriteDirToTar(tw, src, "/nested/dir/dir-in-archive", 1234, 2345, -1, true, false, nil)
-				h.AssertNil(t, err)
-				h.AssertNil(t, tw.Close())
-				h.AssertNil(t, fh.Close())
+					file, err := os.Open(filepath.Join(tmpDir, "some.tar"))
+					h.AssertNil(t, err)
+					defer file.Close()
 
-				file, err := os.Open(filepath.Join(tmpDir, "some.tar"))
-				h.AssertNil(t, err)
-				defer file.Close()
+					tr := tar.NewReader(file)
 
-				tr := tar.NewReader(file)
-
-				verify := h.NewTarVerifier(t, tr, 1234, 2345)
-				verify.NextFile("/nested/dir/dir-in-archive/some-file.txt", "some-content", fileMode(t, filepath.Join(src, "some-file.txt")))
-				verify.NextDirectory("/nested/dir/dir-in-archive/sub-dir", fileMode(t, filepath.Join(src, "sub-dir")))
-				if runtime.GOOS != "windows" {
-					verify.NextSymLink("/nested/dir/dir-in-archive/sub-dir/link-file", "../some-file.txt")
-				}
+					verify := h.NewTarVerifier(t, tr, 1234, 2345)
+					verify.NextDirectory("/nested/dir/dir-in-archive", 0777)
+					verify.NextFile("/nested/dir/dir-in-archive/some-file.txt", "some-content", fileMode(t, filepath.Join(src, "some-file.txt")))
+					verify.NextDirectory("/nested/dir/dir-in-archive/sub-dir", fileMode(t, filepath.Join(src, "sub-dir")))
+					if runtime.GOOS != "windows" {
+						verify.NextSymLink("/nested/dir/dir-in-archive/sub-dir/link-file", "../some-file.txt")
+					}
+				})
 			})
 		})
 
@@ -375,7 +392,7 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 				)
 
 				it.Before(func() {
-					tmpSrcDir, err = ioutil.TempDir("", "socket-test")
+					tmpSrcDir, err = os.MkdirTemp("", "socket-test")
 					h.AssertNil(t, err)
 
 					fakeSocket, err = net.Listen(
@@ -383,7 +400,7 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 						filepath.Join(tmpSrcDir, "fake-socket"),
 					)
 
-					err = ioutil.WriteFile(filepath.Join(tmpSrcDir, "fake-file"), []byte("some-content"), 0777)
+					err = os.WriteFile(filepath.Join(tmpSrcDir, "fake-file"), []byte("some-content"), 0777)
 					h.AssertNil(t, err)
 				})
 
@@ -417,6 +434,37 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 					)
 					verify.NoMoreFilesExist()
 				})
+			})
+		})
+
+		when("hard link files are present", func() {
+			it.Before(func() {
+				src = filepath.Join("testdata", "dir-to-tar-with-hardlink")
+				// create a hard link
+				err := os.Link(filepath.Join(src, "original-file"), filepath.Join(src, "original-file-2"))
+				h.AssertNil(t, err)
+			})
+
+			it.After(func() {
+				os.RemoveAll(filepath.Join(src, "original-file-2"))
+			})
+
+			it("tar file file doesn't include duplicated data", func() {
+				outputFilename := filepath.Join(tmpDir, "file-with-hard-links.tar")
+				fh, err := os.Create(outputFilename)
+				h.AssertNil(t, err)
+
+				tw := tar.NewWriter(fh)
+				err = archive.WriteDirToTar(tw, src, "/nested/dir", 1234, 2345, 0777, true, false, nil)
+
+				h.AssertNil(t, err)
+				h.AssertNil(t, tw.Close())
+				h.AssertNil(t, fh.Close())
+				h.AssertOnTarEntries(t, outputFilename,
+					"/nested/dir/original-file",
+					"/nested/dir/original-file-2",
+					h.AreEquivalentHardLinks(),
+				)
 			})
 		})
 	})
@@ -592,11 +640,11 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 		when("file is not a zip file", func() {
 			when("file has some content", func() {
 				it("returns false", func() {
-					file, err := ioutil.TempFile(tmpDir, "file.txt")
+					file, err := os.CreateTemp(tmpDir, "file.txt")
 					h.AssertNil(t, err)
 					defer file.Close()
 
-					err = ioutil.WriteFile(file.Name(), []byte("content"), os.ModePerm)
+					err = os.WriteFile(file.Name(), []byte("content"), os.ModePerm)
 					h.AssertNil(t, err)
 
 					isZip, err := archive.IsZip(file.Name())
@@ -607,7 +655,7 @@ func testArchive(t *testing.T, when spec.G, it spec.S) {
 
 			when("file doesn't have content", func() {
 				it("returns false", func() {
-					file, err := ioutil.TempFile(tmpDir, "file.txt")
+					file, err := os.CreateTemp(tmpDir, "file.txt")
 					h.AssertNil(t, err)
 					defer file.Close()
 

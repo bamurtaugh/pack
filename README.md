@@ -6,7 +6,7 @@
 [![GoDoc](https://godoc.org/github.com/buildpacks/pack?status.svg)](https://godoc.org/github.com/buildpacks/pack)
 [![GitHub license](https://img.shields.io/github/license/buildpacks/pack)](https://github.com/buildpacks/pack/blob/main/LICENSE)
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/4748/badge)](https://bestpractices.coreinfrastructure.org/projects/4748)
-[![Slack](https://img.shields.io/badge/slack-join-ff69b4.svg?logo=slack)](https://slack.buildpacks.io/)
+[![Slack](https://img.shields.io/badge/slack-join-ff69b4.svg?logo=slack)](https://slack.cncf.io/)
 [![Gitpod ready-to-code](https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/buildpacks/pack)
 
 `pack` makes it easy for...
@@ -34,9 +34,9 @@ Check out the command line documentation [here][pack-docs]
 
 To learn more about the details, check out the [specs repository][specs].
 
-[app-dev]: https://buildpacks.io/docs/app-developer-guide/
-[bp-author]: https://buildpacks.io/docs/buildpack-author-guide/
-[operator]: https://buildpacks.io/docs/operator-guide/
+[app-dev]: https://buildpacks.io/docs/for-app-developers/
+[bp-author]: https://buildpacks.io/docs/for-buildpack-authors/
+[operator]: https://buildpacks.io/docs/for-platform-operators/
 [buildpacks.io]: https://buildpacks.io/
 [install-pack]: https://buildpacks.io/docs/install-pack/
 [getting-started]: https://buildpacks.io/docs/app-journey

@@ -20,32 +20,44 @@ type suggestedStack struct {
 
 var suggestedStacks = []suggestedStack{
 	{
+		ID:          "Deprecation Notice",
+		Description: "Stacks are deprecated in favor of using BuildImages and RunImages directly, but will continue to be supported throughout all of 2023 and 2024 if not longer. Please see our docs for more details- https://buildpacks.io/docs/concepts/components/stack",
+		Maintainer:  "CNB",
+	},
+	{
 		ID:          "heroku-20",
 		Description: "The official Heroku stack based on Ubuntu 20.04",
 		Maintainer:  "Heroku",
-		BuildImage:  "heroku/pack:20-build",
-		RunImage:    "heroku/pack:20",
+		BuildImage:  "heroku/heroku:20-cnb-build",
+		RunImage:    "heroku/heroku:20-cnb",
 	},
 	{
-		ID:          "io.buildpacks.stacks.bionic",
-		Description: "A minimal Paketo stack based on Ubuntu 18.04",
+		ID:          "io.buildpacks.stacks.jammy",
+		Description: "A minimal Paketo stack based on Ubuntu 22.04",
 		Maintainer:  "Paketo Project",
-		BuildImage:  "paketobuildpacks/build:base-cnb",
-		RunImage:    "paketobuildpacks/run:base-cnb",
+		BuildImage:  "paketobuildpacks/build-jammy-base",
+		RunImage:    "paketobuildpacks/run-jammy-base",
 	},
 	{
-		ID:          "io.buildpacks.stacks.bionic",
-		Description: "A large Paketo stack based on Ubuntu 18.04",
+		ID:          "io.buildpacks.stacks.jammy",
+		Description: "A large Paketo stack based on Ubuntu 22.04",
 		Maintainer:  "Paketo Project",
-		BuildImage:  "paketobuildpacks/build:full-cnb",
-		RunImage:    "paketobuildpacks/run:full-cnb",
+		BuildImage:  "paketobuildpacks/build-jammy-full",
+		RunImage:    "paketobuildpacks/run-jammy-full",
 	},
 	{
-		ID:          "io.paketo.stacks.tiny",
-		Description: "A tiny Paketo stack based on Ubuntu 18.04, similar to distroless",
+		ID:          "io.buildpacks.stacks.jammy.tiny",
+		Description: "A tiny Paketo stack based on Ubuntu 22.04, similar to distroless",
 		Maintainer:  "Paketo Project",
-		BuildImage:  "paketobuildpacks/build:tiny-cnb",
-		RunImage:    "paketobuildpacks/run:tiny-cnb",
+		BuildImage:  "paketobuildpacks/build-jammy-tiny",
+		RunImage:    "paketobuildpacks/run-jammy-tiny",
+	},
+	{
+		ID:          "io.buildpacks.stacks.jammy.static",
+		Description: "A static Paketo stack based on Ubuntu 22.04, similar to distroless",
+		Maintainer:  "Paketo Project",
+		BuildImage:  "paketobuildpacks/build-jammy-static",
+		RunImage:    "paketobuildpacks/run-jammy-static",
 	},
 }
 
@@ -53,8 +65,8 @@ func stackSuggest(logger logging.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "suggest",
 		Args:    cobra.NoArgs,
-		Short:   "List the recommended stacks",
-		Example: "pack stacks suggest",
+		Short:   "(deprecated) List the recommended stacks",
+		Example: "pack stack suggest",
 		RunE: logError(logger, func(*cobra.Command, []string) error {
 			Suggest(logger)
 			return nil

@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ghodss/yaml"
-
 	"github.com/Masterminds/semver"
 	"github.com/buildpacks/lifecycle/api"
 	"github.com/heroku/color"
 	"github.com/sclevine/spec"
 	"github.com/sclevine/spec/report"
+	yaml "gopkg.in/yaml.v3"
 
 	pubbldr "github.com/buildpacks/pack/builder"
 	"github.com/buildpacks/pack/internal/builder"
@@ -63,6 +62,15 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
         - id: test.bp.three
           version: test.bp.three.version`
 
+		expectedExtensions = `    extensions:
+        - id: test.bp.one
+          version: test.bp.one.version
+          homepage: http://geocities.com/cool-bp
+        - id: test.bp.two
+          version: test.bp.two.version
+        - id: test.bp.three
+          version: test.bp.three.version`
+
 		expectedDetectionOrder = `    detection_order:
         - buildpacks:
             - id: test.top.nested
@@ -89,6 +97,19 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
             - id: test.bp.two
               version: test.bp.two.version
               optional: true
+        - id: test.bp.three
+          version: test.bp.three.version`
+
+		expectedOrderExtensions = `    order_extensions:
+        - id: test.top.nested
+          version: test.top.nested.version
+        - id: test.bp.one
+          version: test.bp.one.version
+          homepage: http://geocities.com/cool-bp
+          optional: true
+        - id: test.bp.two
+          version: test.bp.two.version
+          optional: true
         - id: test.bp.three
           version: test.bp.three.version`
 		expectedStackWithMixins = `    stack:
@@ -129,7 +150,9 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
                 - "4.5"
 %s
 %s
-%s`, expectedRemoteRunImages, expectedBuildpacks, expectedDetectionOrder)
+%s
+%s
+%s`, expectedRemoteRunImages, expectedBuildpacks, expectedDetectionOrder, expectedExtensions, expectedOrderExtensions)
 
 		expectedLocalInfo = fmt.Sprintf(`local_info:
     description: Some local description
@@ -153,7 +176,9 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
                 - "7.8"
 %s
 %s
-%s`, expectedLocalRunImages, expectedBuildpacks, expectedDetectionOrder)
+%s
+%s
+%s`, expectedLocalRunImages, expectedBuildpacks, expectedDetectionOrder, expectedExtensions, expectedOrderExtensions)
 
 		expectedPrettifiedYAML = fmt.Sprintf(`    builder_name: test-builder
     trusted: false
@@ -168,11 +193,12 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
 				Description:     "Some remote description",
 				Stack:           "test.stack.id",
 				Mixins:          []string{"mixin1", "mixin2", "build:mixin3", "build:mixin4"},
-				RunImage:        "some/run-image",
-				RunImageMirrors: []string{"first/default", "second/default"},
+				RunImages:       []pubbldr.RunImageConfig{{Image: "some/run-image", Mirrors: []string{"first/default", "second/default"}}},
 				Buildpacks:      buildpacks,
 				Order:           order,
-				BuildpackLayers: dist.BuildpackLayers{},
+				Extensions:      extensions,
+				OrderExtensions: orderExtensions,
+				BuildpackLayers: dist.ModuleLayers{},
 				Lifecycle: builder.LifecycleDescriptor{
 					Info: builder.LifecycleInfo{
 						Version: &builder.Version{
@@ -200,11 +226,12 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
 				Description:     "Some local description",
 				Stack:           "test.stack.id",
 				Mixins:          []string{"mixin1", "mixin2", "build:mixin3", "build:mixin4"},
-				RunImage:        "some/run-image",
-				RunImageMirrors: []string{"first/local-default", "second/local-default"},
+				RunImages:       []pubbldr.RunImageConfig{{Image: "some/run-image", Mirrors: []string{"first/local-default", "second/local-default"}}},
 				Buildpacks:      buildpacks,
 				Order:           order,
-				BuildpackLayers: dist.BuildpackLayers{},
+				Extensions:      extensions,
+				OrderExtensions: orderExtensions,
+				BuildpackLayers: dist.ModuleLayers{},
 				Lifecycle: builder.LifecycleDescriptor{
 					Info: builder.LifecycleInfo{
 						Version: &builder.Version{
@@ -329,10 +356,8 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
 
 		when("no run images are specified", func() {
 			it("displays run images as empty list", func() {
-				localInfo.RunImage = ""
-				localInfo.RunImageMirrors = []string{}
-				remoteInfo.RunImage = ""
-				remoteInfo.RunImageMirrors = []string{}
+				localInfo.RunImages = []pubbldr.RunImageConfig{}
+				remoteInfo.RunImages = []pubbldr.RunImageConfig{}
 				emptyLocalRunImages := []config.RunImage{}
 
 				yamlWriter := writer.NewYAML()
@@ -350,8 +375,8 @@ func testYAML(t *testing.T, when spec.G, it spec.S) {
 
 		when("no buildpacks are specified", func() {
 			it("displays buildpacks as empty list", func() {
-				localInfo.Buildpacks = []dist.BuildpackInfo{}
-				remoteInfo.Buildpacks = []dist.BuildpackInfo{}
+				localInfo.Buildpacks = []dist.ModuleInfo{}
+				remoteInfo.Buildpacks = []dist.ModuleInfo{}
 
 				yamlWriter := writer.NewYAML()
 

@@ -2,14 +2,14 @@ package registry_test
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
 	"github.com/sclevine/spec"
 	"github.com/sclevine/spec/report"
-	"gopkg.in/src-d/go-git.v4"
 
 	"github.com/buildpacks/pack/internal/registry"
 	"github.com/buildpacks/pack/pkg/logging"
@@ -34,7 +34,7 @@ func testGit(t *testing.T, when spec.G, it spec.S) {
 	it.Before(func() {
 		logger = logging.NewLogWithWriters(&outBuf, &outBuf)
 
-		tmpDir, err = ioutil.TempDir("", "registry")
+		tmpDir, err = os.MkdirTemp("", "registry")
 		h.AssertNil(t, err)
 
 		registryFixture = h.CreateRegistryFixture(t, tmpDir, filepath.Join("..", "..", "testdata", "registry"))
@@ -43,7 +43,10 @@ func testGit(t *testing.T, when spec.G, it spec.S) {
 	})
 
 	it.After(func() {
-		h.AssertNil(t, os.RemoveAll(tmpDir))
+		if runtime.GOOS != "windows" {
+			h.AssertNil(t, os.RemoveAll(tmpDir))
+		}
+		os.RemoveAll(tmpDir)
 	})
 
 	when("#GitCommit", func() {
